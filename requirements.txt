@@ -36,9 +36,9 @@ mysql-connector-python>=9.0.0
 # uvicorn==0.32.1
 # httpx==0.27.2
 
-# --- Dashboard (Phase 9) ---
-# streamlit==1.40.1
-# plotly==5.24.1
+# --- Dashboard ---
+streamlit==1.40.1
+plotly==5.24.1
 
 # --- Testing ---
 # Tests are needed from Phase 1 onward, so keep them in the reproducible

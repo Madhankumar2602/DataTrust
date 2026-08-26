@@ -26,4 +26,7 @@ venv/
 
 # Generated logs and reports
 logs/*.log
+reports/*.jsondashboard/app_backup.py
+src/etl/loader_backup.py
 reports/*.json
+dashboard/app_backup.py
