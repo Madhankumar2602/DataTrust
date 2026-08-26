@@ -1,0 +1,29 @@
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local datasets
+Copy of Online Retail.csv
+data/raw/*.csv
+
+# Generated databases
+data/*.db
+*.sqlite
+*.sqlite3
+
+# Generated processed data
+data/processed/*.parquet
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# Generated logs and reports
+logs/*.log
+reports/*.json

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: datatrust_postgres
+    environment:
+      POSTGRES_DB: datatrust
+      POSTGRES_USER: datatrust_user
+      POSTGRES_PASSWORD: datatrust_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

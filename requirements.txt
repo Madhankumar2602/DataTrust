@@ -1,0 +1,50 @@
+# =============================================================================
+# DataTrust — Automated Data Quality & Pipeline Observability Platform
+# requirements.txt — DataTrust project dependencies
+# =============================================================================
+# Install with:  pip install -r requirements.txt
+#
+# NOTE on Python 3.13 compatibility:
+#   numpy 1.26.x does NOT ship pre-built wheels for Python 3.13 and would
+#   require a C compiler to build from source.  We use numpy>=2.1 which has
+#   official Python 3.13 wheels and is API-compatible for our use cases.
+# =============================================================================
+
+# --- Core data processing ---
+pandas==2.2.3
+numpy>=2.1.3              # 2.x series has Python 3.13 pre-built wheels
+openpyxl==3.1.5           # Read .xlsx Excel files
+# pyarrow>=15.0.0         # Add when Phase 5 needs Parquet pipeline outputs
+
+# --- Environment & config ---
+python-dotenv>=1.0.1      # Load .env files into environment variables
+
+# --- Data validation / reporting (later phases) ---
+# pydantic>=2.9.2         # Consider when object-model validation is required
+# jinja2>=3.1.4           # HTML report templates
+
+# =============================================================================
+# Packages added in later phases (commented out until needed):
+# =============================================================================
+
+# --- Database (Phase 4) ---
+sqlalchemy==2.0.36
+mysql-connector-python>=9.0.0
+
+# --- API (Phase 8) ---
+# fastapi==0.115.4
+# uvicorn==0.32.1
+# httpx==0.27.2
+
+# --- Dashboard (Phase 9) ---
+# streamlit==1.40.1
+# plotly==5.24.1
+
+# --- Testing ---
+# Tests are needed from Phase 1 onward, so keep them in the reproducible
+# development environment instead of relying on a globally installed pytest.
+pytest==8.3.3
+# pytest-cov==6.0.0
+
+# --- Orchestration (Phase 7) ---
+# apache-airflow==2.10.3   NOTE: Install via constraints file, not plain pip
