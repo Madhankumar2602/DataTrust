@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -46,6 +48,12 @@ class PipelineRun(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     rows_processed: Mapped[int] = mapped_column(Integer, nullable=False)
     health_score: Mapped[float] = mapped_column(Float, nullable=False)
+    # Health tier produced by HealthScorer ("Healthy"/"Warning"/"Poor"/"Critical").
+    # Distinct from `status` above, which is the pipeline EXECUTION result.
+    health_status: Mapped[str | None] = mapped_column(String(20))
+    # Explainable per-dimension breakdown exactly as HealthScorer returned it.
+    # sqlalchemy.JSON maps to MySQL JSON and to serialised TEXT on SQLite.
+    category_scores: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     quality_results: Mapped[list["QualityResult"]] = relationship(back_populates="pipeline_run", cascade="all, delete-orphan")

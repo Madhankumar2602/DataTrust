@@ -55,6 +55,60 @@ def client(test_db_session):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def broken_db_client():
+    """TestClient wired to a database that cannot be opened at all.
+
+    The URL points into a directory that does not exist, so every connection
+    attempt raises a genuine SQLAlchemyError. That exercises the API's
+    database-failure path without mocking the repository or the session.
+    """
+    engine = create_engine(
+        "sqlite:///./__datatrust_missing_dir__/unreachable.db",
+        connect_args={"check_same_thread": False},
+    )
+    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    def override_get_db_session():
+        with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+    engine.dispose()
+
+
+def _seed_run(session, **overrides):
+    """Insert one pipeline run, defaulting every required column."""
+    now = datetime.now(timezone.utc)
+    values = {
+        "pipeline_name": "test_pipeline",
+        "started_at": now,
+        "finished_at": now,
+        "duration_seconds": 1.0,
+        "status": "SUCCESS",
+        "rows_processed": 100,
+        "health_score": 72.08,
+    }
+    values.update(overrides)
+    run = PipelineRun(**values)
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+CATEGORY_SCORES = {
+    "completeness": {"score": 18.75, "max_score": 20.0, "details": "7.5/8 rule points earned."},
+    "validity": {"score": 13.33, "max_score": 20.0, "details": "2.0/3 rule points earned."},
+    "uniqueness": {"score": 10.0, "max_score": 20.0, "details": "0.5/1 rule points earned."},
+    "schema": {"score": 20.0, "max_score": 20.0, "details": "3.0/3 rule points earned."},
+    "business_rules": {"score": 10.0, "max_score": 20.0, "details": "0.5/1 rule points earned."},
+}
+
+
 def test_root_redirect_to_docs(client):
     """Root URL should redirect to Swagger /docs."""
     response = client.get("/", follow_redirects=False)
@@ -239,3 +293,145 @@ def test_summary_endpoint(client, test_db_session):
     assert data["status"] == "OPERATIONAL"
     assert data["latest_health_score"] == 85.0
     assert data["total_rows_processed"] == 541909
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 / M2: health tier, explainability, pagination, failure handling
+# ---------------------------------------------------------------------------
+
+
+def test_health_score_returns_health_tier_not_pipeline_status(client, test_db_session):
+    """health_status must be the HealthScorer tier; pipeline_status the run result."""
+    _seed_run(test_db_session, status="SUCCESS", health_status="Poor", health_score=72.08)
+
+    data = client.get("/api/v1/health-score").json()
+
+    assert data["health_status"] == "Poor"
+    assert data["pipeline_status"] == "SUCCESS"
+    assert data["health_status"] != data["pipeline_status"]
+
+
+def test_health_score_returns_category_breakdown(client, test_db_session):
+    """The stored per-dimension breakdown must reach the API unchanged."""
+    _seed_run(test_db_session, health_status="Poor", category_scores=CATEGORY_SCORES)
+
+    data = client.get("/api/v1/health-score").json()
+
+    assert data["category_scores"] is not None
+    assert set(data["category_scores"]) == {
+        "completeness",
+        "validity",
+        "uniqueness",
+        "schema",
+        "business_rules",
+    }
+    assert data["category_scores"]["schema"]["score"] == 20.0
+    assert data["category_scores"]["validity"]["max_score"] == 20.0
+
+
+def test_health_score_tolerates_run_stored_before_this_feature(client, test_db_session):
+    """Runs persisted before the tier columns existed must still return 200."""
+    _seed_run(test_db_session, health_status=None, category_scores=None)
+
+    response = client.get("/api/v1/health-score")
+
+    assert response.status_code == 200
+    assert response.json()["health_status"] is None
+    assert response.json()["category_scores"] is None
+
+
+def test_summary_reports_health_tier_and_pipeline_status_separately(client, test_db_session):
+    """Summary must not report the execution status where the tier belongs."""
+    _seed_run(test_db_session, status="SUCCESS", health_status="Warning", health_score=80.0)
+
+    data = client.get("/api/v1/summary").json()
+
+    assert data["status"] == "OPERATIONAL"          # service state
+    assert data["health_status"] == "Warning"       # data health tier
+    assert data["pipeline_status"] == "SUCCESS"     # execution result
+
+
+def test_pipeline_runs_pagination(client, test_db_session):
+    """limit/offset must page newest-first while total_runs stays the full count."""
+    for name in ("run_one", "run_two", "run_three"):
+        _seed_run(test_db_session, pipeline_name=name)
+
+    data = client.get("/api/v1/pipeline-runs?limit=2&offset=1").json()
+
+    assert data["total_runs"] == 3      # true stored total, not the page size
+    assert data["returned"] == 2
+    assert data["limit"] == 2
+    assert data["offset"] == 1
+    assert [r["pipeline_name"] for r in data["runs"]] == ["run_two", "run_one"]
+
+
+def test_pipeline_runs_total_is_not_the_page_size(client, test_db_session):
+    """A page smaller than the collection must still report the real total."""
+    for _ in range(3):
+        _seed_run(test_db_session)
+
+    data = client.get("/api/v1/pipeline-runs?limit=1").json()
+
+    assert data["total_runs"] == 3
+    assert data["returned"] == 1
+
+
+def test_anomalies_pagination_and_total(client, test_db_session):
+    """Anomaly totals must count every stored row, not the returned page."""
+    for period in ("2011-09", "2011-10", "2011-11"):
+        test_db_session.add(
+            AnomalyResult(
+                metric="revenue",
+                period=period,
+                value=100.0,
+                expected_value=50.0,
+                deviation_pct=100.0,
+                severity="WARNING",
+                message=f"spike in {period}",
+            )
+        )
+    test_db_session.commit()
+
+    data = client.get("/api/v1/anomalies?limit=2&offset=1").json()
+
+    assert data["total_anomalies"] == 3
+    assert data["returned"] == 2
+    assert data["offset"] == 1
+    assert [a["period"] for a in data["anomalies"]] == ["2011-10", "2011-09"]
+
+
+def test_pagination_rejects_invalid_bounds(client):
+    """Out-of-range pagination is refused by validation, not by the database."""
+    assert client.get("/api/v1/pipeline-runs?limit=0").status_code == 422
+    assert client.get("/api/v1/pipeline-runs?offset=-1").status_code == 422
+    assert client.get("/api/v1/anomalies?limit=500").status_code == 422
+
+
+def test_database_failure_returns_503(broken_db_client):
+    """A database error must surface as 503, never as an unhandled 500."""
+    paths = (
+        "/api/v1/health-score",
+        "/api/v1/pipeline-runs",
+        "/api/v1/anomalies",
+        "/api/v1/summary",
+    )
+    for path in paths:
+        response = broken_db_client.get(path)
+        assert response.status_code == 503, path
+        assert response.json()["detail"] == "Database unavailable. Please try again later."
+
+
+def test_database_failure_does_not_leak_internals(broken_db_client):
+    """The client must never see SQL, table names or driver text."""
+    detail = broken_db_client.get("/api/v1/pipeline-runs").json()["detail"].lower()
+
+    for leak in ("unable to open", "sql", "sqlite", "traceback", "select"):
+        assert leak not in detail
+
+
+def test_health_endpoint_reports_degraded_when_database_is_down(broken_db_client):
+    """/health already handles failure itself and must keep doing so."""
+    data = broken_db_client.get("/health").json()
+
+    assert data["status"] == "degraded"
+    assert data["database"] == "disconnected"

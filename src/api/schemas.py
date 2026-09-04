@@ -27,17 +27,31 @@ class CategoryScoreDetail(BaseModel):
 
 
 class HealthScoreResponse(BaseModel):
+    """Latest Data Health Score with its explainable per-dimension breakdown.
+
+    `health_status` and `pipeline_status` are deliberately separate fields:
+    a run can execute perfectly (pipeline_status="SUCCESS") and still describe
+    data in poor condition (health_status="Poor").
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     run_id: int
     pipeline_name: str
-    health_score: float
-    status: str
+    health_score: float = Field(..., description="Weighted Data Health Score, 0-100")
+    health_status: str | None = Field(
+        default=None,
+        description="Health tier from HealthScorer: Healthy / Warning / Poor / Critical",
+    )
+    pipeline_status: str = Field(..., description="Pipeline execution result, e.g. SUCCESS")
     total_checks: int
     passed: int
     warnings: int
     failed: int
-    category_scores: dict[str, Any] | None = None
+    category_scores: dict[str, Any] | None = Field(
+        default=None,
+        description="Per-dimension score breakdown exactly as HealthScorer produced it",
+    )
     evaluated_at: str
 
 
@@ -49,13 +63,19 @@ class PipelineRunItem(BaseModel):
     started_at: str
     finished_at: str | None = None
     duration_seconds: float | None = None
-    status: str
+    status: str = Field(..., description="Pipeline execution result, e.g. SUCCESS")
     rows_processed: int | None = None
     health_score: float | None = None
+    health_status: str | None = Field(default=None, description="Health tier for this run")
 
 
 class PipelineRunsListResponse(BaseModel):
-    total_runs: int
+    """One page of pipeline runs. `total_runs` is the full stored count."""
+
+    total_runs: int = Field(..., description="Total runs stored, independent of pagination")
+    returned: int = Field(..., description="Runs in this page")
+    limit: int
+    offset: int
     runs: list[PipelineRunItem]
 
 
@@ -98,7 +118,14 @@ class AnomalyItem(BaseModel):
 
 
 class AnomaliesResponse(BaseModel):
-    total_anomalies: int
+    """One page of anomalies. `total_anomalies` is the full stored count."""
+
+    total_anomalies: int = Field(
+        ..., description="Total anomalies stored, independent of pagination"
+    )
+    returned: int = Field(..., description="Anomalies in this page")
+    limit: int
+    offset: int
     anomalies: list[AnomalyItem]
 
 
@@ -106,12 +133,18 @@ class SummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     service: str = "DataTrust"
-    status: str
+    status: str = Field(..., description="Service state: OPERATIONAL or INITIALIZING")
     latest_run_id: int | None = None
     latest_health_score: float | None = None
-    health_status: str | None = None
+    health_status: str | None = Field(
+        default=None,
+        description="Health tier of the latest run: Healthy / Warning / Poor / Critical",
+    )
+    pipeline_status: str | None = Field(
+        default=None, description="Execution result of the latest run, e.g. SUCCESS"
+    )
     total_rows_processed: int | None = None
-    quality_failures: int = 0
-    quality_warnings: int = 0
-    anomaly_count: int = 0
+    quality_failures: int = Field(default=0, description="FAIL checks in the latest run")
+    quality_warnings: int = Field(default=0, description="WARNING checks in the latest run")
+    anomaly_count: int = Field(default=0, description="Total anomalies stored across all runs")
     last_run_timestamp: str | None = None

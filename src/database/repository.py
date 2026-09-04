@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from src.database.models import AnomalyResult, PipelineRun, QualityResult
@@ -32,7 +32,7 @@ class QualityRepository:
         finished = finished_at or datetime.now(timezone.utc)
         started = started_at or _parse_timestamp(quality_report.get("validated_at"), finished)
         duration = max((finished - started).total_seconds(), 0.0)
-        pipeline_run = PipelineRun(pipeline_name=pipeline_name, started_at=started, finished_at=finished, duration_seconds=round(duration, 4), status=status, rows_processed=int(quality_report.get("total_rows", 0)), health_score=float(score_report.get("score", 0.0)))
+        pipeline_run = PipelineRun(pipeline_name=pipeline_name, started_at=started, finished_at=finished, duration_seconds=round(duration, 4), status=status, rows_processed=int(quality_report.get("total_rows", 0)), health_score=float(score_report.get("score", 0.0)), health_status=score_report.get("status"), category_scores=score_report.get("category_scores"))
         try:
             self.session.add(pipeline_run)
             self.session.flush()
@@ -52,15 +52,27 @@ class QualityRepository:
         """Return one stored pipeline run by ID with its quality results."""
         return self.session.scalar(self._runs_query().where(PipelineRun.run_id == run_id))
 
-    def get_recent_runs(self, limit: int = 10) -> list[PipelineRun]:
+    def get_recent_runs(self, limit: int = 10, offset: int = 0) -> list[PipelineRun]:
         """Return newest pipeline runs, bounded to a safe positive limit."""
         if limit < 1:
             raise ValueError("limit must be at least 1")
-        return list(self.session.scalars(self._runs_query().order_by(PipelineRun.run_id.desc()).limit(limit)))
+        if offset < 0:
+            raise ValueError("offset must not be negative")
+        statement = (
+            self._runs_query()
+            .order_by(PipelineRun.run_id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
 
-    def get_runs(self, limit: int = 10) -> list[PipelineRun]:
+    def get_runs(self, limit: int = 10, offset: int = 0) -> list[PipelineRun]:
         """Alias for get_recent_runs."""
-        return self.get_recent_runs(limit=limit)
+        return self.get_recent_runs(limit=limit, offset=offset)
+
+    def count_runs(self) -> int:
+        """Return how many pipeline runs are stored, ignoring pagination."""
+        return int(self.session.scalar(select(func.count()).select_from(PipelineRun)) or 0)
 
     def get_quality_results(self, run_id: int) -> list[QualityResult]:
         """Return individual results for one stored pipeline run."""
@@ -108,16 +120,23 @@ class QualityRepository:
             self.session.rollback()
             raise
 
-    def get_anomalies(self, limit: int = 50) -> list[AnomalyResult]:
+    def get_anomalies(self, limit: int = 50, offset: int = 0) -> list[AnomalyResult]:
         """Return the most recently detected anomalies, newest first."""
         if limit < 1:
             raise ValueError("limit must be at least 1")
+        if offset < 0:
+            raise ValueError("offset must not be negative")
         statement = (
             select(AnomalyResult)
             .order_by(AnomalyResult.anomaly_id.desc())
+            .offset(offset)
             .limit(limit)
         )
         return list(self.session.scalars(statement))
+
+    def count_anomalies(self) -> int:
+        """Return how many anomalies are stored, ignoring pagination."""
+        return int(self.session.scalar(select(func.count()).select_from(AnomalyResult)) or 0)
 
     def _runs_query(self) -> Select[tuple[PipelineRun]]:
         return select(PipelineRun).options(selectinload(PipelineRun.quality_results))
