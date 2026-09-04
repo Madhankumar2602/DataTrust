@@ -202,6 +202,14 @@ def get_anomalies() -> pd.DataFrame:
 # Helper functions
 # ---------------------------------------------------------------------------
 
+# Pipeline EXECUTION statuses that mean the run finished normally. The writers
+# use two spellings: src/etl/pipeline.py and the Airflow DAG store "SUCCESS",
+# while QualityRepository.save_run defaults to "COMPLETED" (used by
+# run_database.py). Data-quality findings are reported separately and never
+# make a run "failed".
+PIPELINE_SUCCESS_STATUSES = {"SUCCESS", "COMPLETED"}
+
+
 def health_label(score: float) -> str:
     if score >= 90:
         return "Excellent"
@@ -326,12 +334,12 @@ if page == "Overview":
     status_col, score_col = st.columns([1, 3])
 
     with status_col:
-        if latest_status == "SUCCESS":
-            st.success("● PIPELINE HEALTHY")
+        if latest_status in PIPELINE_SUCCESS_STATUSES:
+            st.success(f"● PIPELINE {latest_status}")
         elif latest_status == "WARNING":
             st.warning("● PIPELINE WARNING")
         else:
-            st.error("● PIPELINE FAILED")
+            st.error(f"● PIPELINE {latest_status or 'UNKNOWN'}")
 
     with score_col:
         if score_delta is None:

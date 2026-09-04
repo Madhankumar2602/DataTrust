@@ -1,0 +1,45 @@
+# Version control and CI
+.git
+.gitignore
+.gitattributes
+.github
+
+# Local environments (the image installs from requirements.txt instead)
+.venv
+venv
+ENV
+
+# Python caches and build artefacts
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Secrets: DATABASE_URL and credentials reach containers through compose
+.env
+.env.*
+!.env.example
+
+# Datasets and generated artefacts. data/, reports/ and logs/ are bind-mounted
+# by docker-compose, so baking them into the image would only bloat it - the
+# raw Online Retail CSV alone is ~45 MB.
+data
+reports
+logs
+*.csv
+*.parquet
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Editor and OS noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db

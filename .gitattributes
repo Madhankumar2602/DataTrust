@@ -1,0 +1,21 @@
+# Normalise line endings. The project is developed on Windows and edited by
+# several tools, which has already produced whole-file CRLF-only diffs.
+# Text files are stored with LF in git and checked out natively on each OS.
+* text=auto
+
+*.py    text diff=python
+*.md    text
+*.yml   text
+*.yaml  text
+*.cfg   text
+*.txt   text
+
+# Files that must keep LF even on Windows: they run inside Linux containers.
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+.dockerignore text eol=lf
+
+# Never normalise binary data.
+*.parquet binary
+*.db      binary
+*.xlsx    binary

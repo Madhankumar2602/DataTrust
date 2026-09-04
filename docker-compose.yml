@@ -1,17 +1,140 @@
-version: '3.8'
+# DataTrust local stack: MySQL + FastAPI + Streamlit.
+#
+# Airflow is deliberately NOT here. It stays a local development orchestrator,
+# as decided for this project - containerising it would add a scheduler, a
+# webserver and its own metadata database for no observable benefit.
+#
+# Credentials come from an untracked .env file next to this one; see
+# .env.example. Compose fails with a clear message if one is missing.
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: datatrust_postgres
+  mysql:
+    image: mysql:8.0
+    container_name: datatrust_mysql
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: datatrust
-      POSTGRES_USER: datatrust_user
-      POSTGRES_PASSWORD: datatrust_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-datatrust}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      # Host port 3307 on purpose: a local MySQL install already owns 3306.
+      # Containers still talk to this server on its internal port 3306.
+      - "${MYSQL_HOST_PORT:-3307}:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Named volume, so data survives `docker compose down` and returns on
+      # the next `up`. Only `docker compose down -v` destroys it.
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # One-shot: creates missing tables, loads no data, then exits. The API waits
+  # for it to complete so a fresh volume yields a working stack, while the
+  # 541k-row import stays an explicit `docker compose run --rm api python run_etl.py`.
+  db-init:
+    build: .
+    image: datatrust-app:latest
+    container_name: datatrust_db_init
+    command: ["python", "scripts/init_db.py"]
+    environment:
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-datatrust}
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    image: datatrust-app:latest
+    container_name: datatrust_api
+    restart: unless-stopped
+    command:
+      - uvicorn
+      - src.api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    environment:
+      # Hostname is the compose service name, never 127.0.0.1: inside a
+      # container, localhost is that container.
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-datatrust}
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mounted rather than baked into the image: the raw dataset is
+      # ~45 MB, and reports/logs are outputs the host should keep.
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # Reuses the application's own /health endpoint. No curl in the slim
+      # image, so this uses the interpreter that is already there.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  dashboard:
+    build: .
+    image: datatrust-app:latest
+    container_name: datatrust_dashboard
+    restart: unless-stopped
+    command:
+      - streamlit
+      - run
+      - dashboard/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+    environment:
+      # HYBRID architecture, unchanged: the dashboard reads MySQL directly for
+      # heavy retail queries. DATATRUST_API_URL is provided so API-oriented
+      # panels can move behind FastAPI without touching this file.
+      DATABASE_URL: mysql+mysqlconnector://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-datatrust}
+      DATATRUST_API_URL: http://api:8000
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      api:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health').read()
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
-  postgres_data:
+  mysql_data:
+    name: datatrust_mysql_data
