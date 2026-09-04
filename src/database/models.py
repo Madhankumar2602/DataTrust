@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -57,7 +67,7 @@ class QualityResult(Base):
     check_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
-    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     affected_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     affected_percentage: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
@@ -88,3 +98,60 @@ class RetailTransaction(Base):
     is_cancellation: Mapped[bool] = mapped_column(nullable=False, index=True)
     revenue: Mapped[float] = mapped_column(Float, nullable=False)
     loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+class AnomalyResult(Base):
+    """Persist detected data anomalies for historical analysis."""
+
+    __tablename__ = "anomaly_results"
+    __table_args__ = (
+        Index("ix_anomaly_results_metric_period", "metric", "period"),
+    )
+
+    anomaly_id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    metric: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    period: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    value: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+    )
+
+    expected_value: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+    )
+
+    deviation_pct: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+    )
+
+    severity: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        index=True,
+    )
+
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        nullable=False,
+    )

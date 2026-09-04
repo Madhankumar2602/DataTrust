@@ -177,6 +177,27 @@ def get_country_revenue() -> pd.DataFrame:
     )
 
 
+@st.cache_data(ttl=60)
+def get_anomalies() -> pd.DataFrame:
+    return run_query(
+        """
+        SELECT
+            anomaly_id,
+            metric,
+            period,
+            value,
+            expected_value,
+            deviation_pct,
+            severity,
+            message,
+            detected_at
+        FROM anomaly_results
+        ORDER BY anomaly_id DESC
+        LIMIT 200
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -226,6 +247,7 @@ page = st.sidebar.radio(
         "Data Quality",
         "Retail Analytics",
         "Pipeline History",
+        "Anomalies",
     ],
 )
 
@@ -922,5 +944,184 @@ elif page == "Pipeline History":
 
     st.plotly_chart(
         fig,
+        use_container_width=True,
+    )
+
+
+# ===========================================================================
+# ANOMALIES
+# ===========================================================================
+
+elif page == "Anomalies":
+
+    st.title("⚠️ Anomaly Detection")
+
+    st.markdown(
+        "Statistical anomalies detected by DataTrust across revenue, "
+        "transaction volume, and cancellation rate. All values are "
+        "sourced live from MySQL — nothing is hardcoded."
+    )
+
+    try:
+        anomalies_df = get_anomalies()
+    except Exception as exc:
+        st.error("Unable to load anomaly data.")
+        st.exception(exc)
+        st.stop()
+
+    if anomalies_df.empty:
+        st.info(
+            "No anomalies have been persisted yet. "
+            "Run `run_anomaly.py` to detect and store anomalies."
+        )
+        st.stop()
+
+    # -----------------------------------------------------------------------
+    # KPI cards
+    # -----------------------------------------------------------------------
+
+    st.divider()
+
+    n_critical = int((anomalies_df["severity"] == "CRITICAL").sum())
+    n_warning = int((anomalies_df["severity"] == "WARNING").sum())
+    n_metrics = anomalies_df["metric"].nunique()
+    n_periods = anomalies_df["period"].nunique()
+
+    k1, k2, k3, k4 = st.columns(4)
+
+    with k1:
+        st.metric("🔴 Critical Anomalies", n_critical)
+    with k2:
+        st.metric("🟡 Warnings", n_warning)
+    with k3:
+        st.metric("Metrics Affected", n_metrics)
+    with k4:
+        st.metric("Periods Affected", n_periods)
+
+    # -----------------------------------------------------------------------
+    # Filters
+    # -----------------------------------------------------------------------
+
+    st.divider()
+    st.subheader("🔍 Filter Anomalies")
+
+    filter_col1, filter_col2 = st.columns(2)
+
+    with filter_col1:
+        severity_options = ["All"] + sorted(anomalies_df["severity"].unique().tolist())
+        selected_severity = st.selectbox(
+            "Severity",
+            severity_options,
+            key="anomaly_severity_filter",
+        )
+
+    with filter_col2:
+        metric_options = ["All"] + sorted(anomalies_df["metric"].unique().tolist())
+        selected_metric = st.selectbox(
+            "Metric",
+            metric_options,
+            key="anomaly_metric_filter",
+        )
+
+    filtered = anomalies_df.copy()
+
+    if selected_severity != "All":
+        filtered = filtered[filtered["severity"] == selected_severity]
+
+    if selected_metric != "All":
+        filtered = filtered[filtered["metric"] == selected_metric]
+
+    st.caption(f"Showing {len(filtered)} of {len(anomalies_df)} anomalies")
+
+    # -----------------------------------------------------------------------
+    # Anomaly alert cards
+    # -----------------------------------------------------------------------
+
+    st.divider()
+    st.subheader("🚨 Anomaly Summary")
+
+    for _, row in filtered.iterrows():
+        direction = "↑" if row["deviation_pct"] > 0 else "↓"
+        pct = abs(float(row["deviation_pct"]))
+        label = f"{row['severity']} | {row['metric'].title()} | {row['period']} | {direction}{pct:.1f}%"
+        detail = (
+            f"**Value:** {float(row['value']):,.2f}  \n"
+            f"**Expected:** {float(row['expected_value']):,.2f}  \n"
+            f"**Message:** {row['message']}"
+        )
+        if row["severity"] == "CRITICAL":
+            with st.expander(f"🔴 {label}"):
+                st.markdown(detail)
+        else:
+            with st.expander(f"🟡 {label}"):
+                st.markdown(detail)
+
+    # -----------------------------------------------------------------------
+    # Deviation chart
+    # -----------------------------------------------------------------------
+
+    st.divider()
+    st.subheader("📊 Deviation % by Anomaly")
+
+    if not filtered.empty:
+        chart_df = filtered.copy()
+        chart_df["label"] = (
+            chart_df["metric"].str.title()
+            + " "
+            + chart_df["period"]
+        )
+        chart_df["abs_deviation"] = chart_df["deviation_pct"].abs()
+
+        fig = px.bar(
+            chart_df.sort_values("abs_deviation"),
+            x="abs_deviation",
+            y="label",
+            color="severity",
+            orientation="h",
+            color_discrete_map={
+                "CRITICAL": "#EF4444",
+                "WARNING": "#F59E0B",
+            },
+            labels={
+                "abs_deviation": "Absolute Deviation (%)",
+                "label": "Anomaly",
+                "severity": "Severity",
+            },
+        )
+
+        fig.update_layout(
+            height=max(300, 80 * len(chart_df)),
+            margin=dict(l=10, r=20, t=30, b=20),
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    # -----------------------------------------------------------------------
+    # Historical anomaly table
+    # -----------------------------------------------------------------------
+
+    st.divider()
+    st.subheader("📋 Anomaly History Table")
+
+    display_cols = [
+        "severity",
+        "metric",
+        "period",
+        "value",
+        "expected_value",
+        "deviation_pct",
+        "message",
+        "detected_at",
+    ]
+
+    available = [c for c in display_cols if c in filtered.columns]
+
+    st.dataframe(
+        filtered[available].rename(columns={
+            "expected_value": "expected",
+            "deviation_pct": "deviation %",
+            "detected_at": "detected at",
+        }),
+        hide_index=True,
         use_container_width=True,
     )

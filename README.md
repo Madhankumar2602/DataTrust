@@ -1,40 +1,66 @@
 # DataTrust — Automated Data Quality & Pipeline Observability Platform
 
-> A portfolio-quality Data Engineering project built incrementally — working, explainable, and testable at every step.
+> **DataTrust** determines whether data can be trusted by validating data quality, calculating a health score, detecting anomalies, storing historical results, and exposing the results through an observability dashboard.
 
 ---
 
-## What is DataTrust?
+## Architecture
 
-DataTrust monitors data pipelines and automatically determines whether incoming data can be trusted. It detects missing values, duplicate records, invalid values, schema drift, volume anomalies, freshness problems, and pipeline failures — then calculates an overall **Data Health Score**.
+```
+Raw CSV Dataset
+       │
+       ▼
+ ┌───────────┐
+ │    ETL    │  Lossless extraction & transformation (batch load)
+ └─────┬─────┘
+       │
+       ▼
+ ┌───────────┐
+ │   MySQL   │  Normalized staging table (`retail_transactions`)
+ └─────┬─────┘
+       │
+       ▼
+ ┌───────────┐
+ │  Quality  │  Schema, Completeness, Validity, Uniqueness checks
+ └─────┬─────┘
+       │
+       ▼
+ ┌───────────┐
+ │  Scoring  │  Weighted 0–100 Data Health Score & tier categorization
+ └─────┬─────┘
+       │
+       ▼
+ ┌───────────┐
+ │  Anomaly  │  Statistical rolling Z-score & domain heuristics
+ └─────┬─────┘
+       │
+       ▼
+ ┌───────────┐
+ │  History  │  Persistent audit log (`pipeline_runs`, `quality_results`, `anomaly_results`)
+ └─────┬─────┘
+       │
+       ▼
+ ┌───────────┐
+ │ Dashboard │  Streamlit + Plotly interactive observability UI
+ └───────────┘
+```
+
+- **Orchestration**: Apache Airflow DAG (`dags/datatrust_pipeline.py`) coordinates the sequential execution, dependencies, and retries across stages.
+- **Continuous Integration**: GitHub Actions (`.github/workflows/ci.yml`) validates the entire test suite on every push and pull request.
 
 ---
 
 ## Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Language | Python 3.13 |
-| Data Processing | Pandas, NumPy |
-| Database | PostgreSQL + SQLAlchemy (Phase 4) |
-| Orchestration | Apache Airflow (Phase 7+) |
-| API | FastAPI (Phase 8+) |
-| Dashboard | Streamlit + Plotly (Phase 9+) |
-| Testing | Pytest |
-| Containerization | Docker + Docker Compose (Phase 15+) |
-| CI/CD | GitHub Actions (Phase 16+) |
-
----
-
-## Dataset
-
-**UCI Online Retail Dataset**
-- Source: https://archive.ics.uci.edu/dataset/352/online+retail
-- License: CC BY 4.0
-- Rows: 541,909 | Columns: 8 | Date range: Dec 2010 – Dec 2011
-- UK-based online retailer selling gift ware
-
-> The original dataset is never modified. All transformations work on copies.
+| Layer | Technology | Description |
+|---|---|---|
+| **Runtime** | Python 3.13 | Core execution environment |
+| **Data Processing** | Pandas 2.2, NumPy 2.1 | In-memory extraction, transformation, and statistical calculations |
+| **Database & ORM** | MySQL 8.0+, SQLAlchemy 2.0 | Transaction staging, pipeline run tracking, quality metrics, anomaly records |
+| **Observability** | Streamlit, Plotly | Interactive analytics and data quality monitoring dashboard |
+| **Orchestration** | Apache Airflow | Multi-stage pipeline scheduling and execution flow |
+| **Testing** | Pytest | Comprehensive unit test suite (isolated in-memory SQLite fixtures) |
+| **CI/CD** | GitHub Actions | Automated build and test validation |
 
 ---
 
@@ -42,330 +68,197 @@ DataTrust monitors data pipelines and automatically determines whether incoming 
 
 ```
 DataTrust/
+├── .github/workflows/
+│   └── ci.yml                 # GitHub Actions CI workflow
+├── dags/
+│   └── datatrust_pipeline.py  # Airflow DAG definition and stage callables
+├── dashboard/
+│   └── app.py                 # Streamlit observability dashboard
 ├── data/
-│   ├── raw/                  # Original dataset (never modified)
-│   ├── processed/            # Cleaned / transformed outputs
-│   └── test/                 # Controlled failure datasets
-│       ├── missing_values/
-│       ├── duplicates/
-│       ├── invalid_values/
-│       ├── schema_drift/
-│       ├── volume_anomaly/
-│       └── freshness/
+│   ├── raw/                   # Immutable raw dataset (online_retail.csv)
+│   └── processed/             # Cleaned Parquet exports (when needed)
 ├── src/
-│   ├── config.py             # Central configuration
-│   ├── logger.py             # Shared logging
-│   ├── ingestion/            # Data loading layer
-│   │   └── loader.py
-│   ├── profiling/            # Dataset profiling
-│   │   └── profiler.py
-│   ├── quality/              # Data quality engine (Phase 3+)
-│   ├── scoring/              # Health score calculation (Phase 4+)
-│   ├── database/             # PostgreSQL models (Phase 5+)
-│   ├── api/                  # FastAPI endpoints (Phase 8+)
-│   ├── pipeline/             # ETL pipeline (Phase 6+)
-│   ├── anomaly/              # Anomaly detection (Phase 11+)
-│   └── lineage/              # Data lineage (Phase 13+)
+│   ├── config.py              # Centralized environment & settings configuration
+│   ├── logger.py              # Structured application logger
+│   ├── ingestion/
+│   │   └── loader.py          # Pure CSV / Excel ingestion loader
+│   ├── profiling/
+│   │   └── profiler.py        # Dataset statistical profiler
+│   ├── quality/
+│   │   ├── base.py            # Quality check base classes and result dataclasses
+│   │   ├── schema.py          # Schema contract validation
+│   │   ├── completeness.py    # Missing value and null ratio rules
+│   │   ├── validity.py        # Domain rules, range checks, cancellation checks
+│   │   ├── uniqueness.py      # Duplicate record detection
+│   │   └── engine.py          # Validation engine orchestrator
+│   ├── scoring/
+│   │   └── scorer.py          # Health Score calculation engine (0–100)
+│   ├── database/
+│   │   ├── connection.py      # Database engine & session factory
+│   │   ├── models.py          # SQLAlchemy ORM models (DeclarativeBase)
+│   │   └── repository.py      # QualityRepository CRUD & querying abstraction
+│   ├── etl/
+│   │   ├── extractor.py       # Source CSV extraction
+│   │   ├── transformer.py     # Lossless feature normalization and typing
+│   │   ├── loader.py          # Chunked batch loader into MySQL
+│   │   └── pipeline.py        # Composable ETL runner
+│   └── anomaly/
+│       ├── detector.py        # Rolling Z-score anomaly detector
+│       └── rules.py           # Severity classification & domain rules
 ├── tests/
-│   ├── unit/                 # Fast tests, no external deps
-│   └── integration/          # Tests requiring DB / API
-├── dags/                     # Airflow DAGs (Phase 7+)
-├── dashboard/                # Streamlit app (Phase 9+)
-├── docker/                   # Dockerfiles (Phase 15+)
-├── .github/workflows/        # CI/CD (Phase 16+)
-├── reports/                  # Generated quality reports (JSON)
-├── logs/                     # Runtime logs
-├── config/                   # External config files
-├── run_profiler.py           # Phase 1 entry point
-├── requirements.txt
-├── setup.cfg                 # pytest + flake8 config
-├── .env.example              # Environment variable template
-└── .gitignore
+│   └── unit/
+│       ├── test_profiler.py
+│       ├── test_quality.py
+│       ├── test_scorer.py
+│       ├── test_database.py
+│       ├── test_etl.py
+│       ├── test_anomaly.py
+│       └── test_orchestration.py
+├── reports/                   # Generated JSON validation and profile reports
+├── logs/                      # Application execution logs
+├── run_profiler.py            # CLI: Run dataset profiler
+├── run_quality.py             # CLI: Run data quality checks
+├── run_scoring.py             # CLI: Run health scoring calculation
+├── run_database.py            # CLI: Run historical persistence check
+├── run_etl.py                 # CLI: Run complete 541k-row ETL pipeline
+├── run_anomaly.py             # CLI: Run time-series anomaly detection
+├── requirements.txt           # Project dependencies
+├── setup.cfg                  # Pytest & Flake8 configuration
+├── .env.example               # Environment variables template
+└── .gitignore                 # Git ignore configuration
 ```
 
 ---
 
-## Setup Instructions
+## Setup & Quickstart
 
-### Prerequisites
-- Python 3.11 or 3.13
-- Git (download from https://git-scm.com if not installed)
+### 1. Prerequisites
+- Python 3.13 (or 3.11+)
+- MySQL Server (running locally or in container on port 3306)
+- Git
 
-### 1. Clone the repository
+### 2. Virtual Environment Setup
 ```bash
-git clone https://github.com/YOUR_USERNAME/DataTrust.git
-cd DataTrust
-```
-
-### 2. Create a virtual environment
-```bash
+# Create and activate virtual environment
 python -m venv .venv
 
-# Windows
-.venv\Scripts\activate
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
 
-# Mac / Linux
+# Linux / macOS:
 source .venv/bin/activate
-```
 
-### 3. Install dependencies
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-> **Note on Python 3.13:** `numpy 1.26.x` does not ship pre-built wheels for Python 3.13.
-> This project uses `numpy>=2.1.3` which has official Python 3.13 support.
-
-### 4. Set up environment variables
+### 3. Configure Environment Variables
+Copy `.env.example` to `.env` and configure your MySQL credentials:
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+```
+Inside `.env`:
+```ini
+DATABASE_URL=mysql+mysqlconnector://root:your_password@localhost:3306/datatrust
+APP_ENV=development
+LOG_LEVEL=INFO
 ```
 
-### 5. Place the dataset
-Download the UCI Online Retail dataset from:
-https://archive.ics.uci.edu/dataset/352/online+retail
-
-Place `online_retail.csv` (or convert the Excel file) at:
-```
-data/raw/online_retail.csv
+Make sure the `datatrust` database exists in MySQL:
+```sql
+CREATE DATABASE IF NOT EXISTS datatrust;
 ```
 
 ---
 
-## Running Phase 1 — Dataset Profiling
+## Running the Pipeline
 
+You can run individual pipeline stages via CLI runners:
+
+### 1. Dataset Profiling
 ```bash
 python run_profiler.py
 ```
+*Profiles 541,909 rows, generating summary stats, missing rates, and duplicate counts into `reports/phase1_profile.json`.*
 
-**Output:**
-- Console summary with all profiling stats
-- JSON report saved to `reports/phase1_profile.json`
-- Log file at `logs/datatrust.log`
-
----
-
-## Running Phase 2 — Data Quality Validation
-
+### 2. Data Quality Validation
 ```bash
 python run_quality.py
 ```
+*Executes 16 quality checks across schema, completeness, validity, and uniqueness, saving results to `reports/quality_<timestamp>.json`.*
 
-This creates a timestamped JSON report in `reports/`. Every result includes a
-check name, category, status, severity, affected rows/percentage, plain-English
-message, and check-specific metadata.
-
-Phase 2 rules are deliberately business-aware: missing `CustomerID` values are
-reported as `INFO` because guest transactions are valid; cancellation invoices
-(`InvoiceNo` starting with `C`) may have negative quantities; negative prices
-are failures; zero-price records, missing descriptions, and exact duplicate
-rows are warnings.
-
----
-
-## Running Phase 3 — Data Health Score
-
+### 3. Data Health Scoring
 ```bash
 python run_scoring.py
 ```
+*Computes the weighted 0–100 Data Health Score and assigns a status tier (`EXCELLENT`, `GOOD`, `POOR`, `CRITICAL`).*
 
-This runs the Phase 2 checks, converts their structured results into a
-0–100 score, and saves [health_score_latest.json](reports/health_score_latest.json).
-The score uses five equally weighted dimensions: schema, completeness, validity,
-uniqueness, and business rules. `PASS`/`INFO` earn full rule points, `WARNING`
-earns half, and `FAIL` earns none. The report lists every contributing check,
-so the score is explainable rather than a black box.
-
----
-
-## Phase 4 — PostgreSQL Historical Quality Storage
-
-Phase 4 stores one pipeline run and its individual validation results so later
-product layers can show quality history without re-reading old JSON files.
-
-```
-Dataset -> Quality Engine -> Health Score -> PostgreSQL
-                                            |          |
-                                      pipeline_runs  quality_results
-```
-
-### Database setup
-
-1. Create a local PostgreSQL database and user.
-2. Copy `.env.example` to an untracked `.env` file.
-3. Set `DATABASE_URL` using the supplied PostgreSQL URL template. Never commit
-   real credentials.
-4. Install dependencies and initialize the schema:
-
+### 4. Database Persistence
 ```bash
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python scripts/init_db.py
+python run_database.py
 ```
+*Runs quality checks, computes health scores, and persists run metadata to MySQL tables.*
 
-The initialization command is safe to run repeatedly. It verifies the
-connection and creates `pipeline_runs` and `quality_results` when absent.
-
-### Store a run and query history
-
+### 5. Full ETL Pipeline (541k Rows)
 ```bash
-.venv\Scripts\python run_database.py
+python run_etl.py
 ```
+*Extracts raw data, applies lossless transformations (`is_cancellation`, `revenue`, ISO timestamps), and batch-loads 541,909 records into MySQL.*
 
-`pipeline_runs` stores timing, status, row count, and health score. Every
-structured Phase 2 result is stored in `quality_results` through the `run_id`
-foreign key. The repository supports latest/recent runs, results for a run,
-historical scores, failed checks, and warnings.
-
-Example PostgreSQL queries:
-
-```sql
--- Most recent run
-SELECT run_id, pipeline_name, health_score, status, finished_at
-FROM pipeline_runs ORDER BY run_id DESC LIMIT 1;
-
--- Quality trend
-SELECT started_at, health_score
-FROM pipeline_runs ORDER BY started_at;
-
--- Failures for a particular run
-SELECT check_name, category, severity, affected_rows, message
-FROM quality_results WHERE run_id = 1 AND status = 'FAIL';
-```
-
-### Cancellation-rule investigation
-
-The 1,336 negative quantities without a `C` prefix are not automatically
-treated as corruption. All 1,336 are zero-price records with missing
-`CustomerID` (and 862 also have no `Description`), which is an
-administrative-adjustment pattern.
-DataTrust reports this as a medium `WARNING`: it stays visible for
-investigation, but is not claimed to be a definite failed cancellation rule.
-
----
-
-## Phase 5 — Lossless ETL Pipeline
-
-```
-data/raw/online_retail.csv
-  -> Extract -> Transform -> PostgreSQL retail_transactions
-  -> Validate -> Score -> pipeline_runs + quality_results
-```
-
-Run the complete pipeline after configuring PostgreSQL:
-
+### 6. Time-Series Anomaly Detection
 ```bash
-.venv\Scripts\python run_etl.py
+python run_anomaly.py
 ```
-
-The raw CSV is immutable: extraction reads it only, and transformation works on
-a DataFrame copy. The pipeline never deletes duplicates, missing CustomerIDs,
-negative prices, or suspicious adjustment rows. Those records are deliberately
-preserved so the quality engine can detect and report them.
-
-Transformations are limited to safe normalization and derivation:
-
-- `InvoiceDate` is parsed, verified, and normalized to ISO format.
-- `Quantity` and `UnitPrice` are converted to numeric values.
-- `IsCancellation` is derived from the `C` invoice prefix.
-- `Revenue` is `Quantity * UnitPrice`; cancelled transactions therefore have
-  negative revenue, and no quality concern is hidden.
-
-The PostgreSQL `retail_transactions` table is the current transformed snapshot.
-Each load replaces that snapshot and verifies the exact row count. The original
-source remains untouched; historical execution and quality history stay in
-`pipeline_runs` and `quality_results`.
-
-An ETL execution status is intentionally independent from data quality. For
-example, an ETL run can be `SUCCESS` with a 72.08 health score and quality
-warnings/failures: processing worked, but DataTrust found concerns that deserve
-attention. Extraction, transformation, and database failures instead return a
-clear failed stage and stop the pipeline.
+*Analyzes monthly trends in revenue, volume, and cancellation rates, detecting and persisting anomalies to MySQL.*
 
 ---
 
-## Running Tests
+## Observability Dashboard
 
+Launch the interactive Streamlit dashboard:
 ```bash
-# All tests
-pytest
-
-# Only unit tests (fast, no external dependencies)
-pytest -m unit
-
-# Specific test file
-pytest tests/unit/test_profiler.py -v
+streamlit run dashboard/app.py
 ```
+Navigate to `http://localhost:8501` to view:
+- **System Overview**: Overall health gauges, latest pipeline metrics, and quality distribution.
+- **Data Quality Explorer**: Breakdown of pass/warning/failure checks and affected row counts.
+- **Retail Analytics**: Transaction snapshots, top products, and geographical distribution.
+- **Pipeline History**: Historical trend charts of data health scores over time.
+- **Anomaly Detection Radar**: KPI cards, deviation bar charts, and detailed anomaly history.
 
 ---
 
-## Phase 1 Findings — Real Dataset Profile
+## Airflow Orchestration
 
-| Metric | Value |
-|---|---|
-| Total rows | 541,909 |
-| Total columns | 8 |
-| Memory usage | 173 MB |
-| Date range | 2010-12-01 → 2011-12-09 (373 days) |
-| Trading days | 305 |
-| Avg transactions/day | 1,776 |
-| Unique customers | 4,372 |
-| Unique products | 4,070 |
-| Countries | 38 |
-| Unique invoices | 25,900 |
-
-### Quality Issues Found
-
-| Issue | Count | % | Verdict |
-|---|---|---|---|
-| Missing CustomerID | 135,080 | 24.9% | Expected (guest purchases) |
-| Missing Description | 1,454 | 0.3% | Worth investigating |
-| Duplicate rows | 5,268 | 0.97% | Needs cleaning |
-| Cancellation invoices | 9,288 | 1.7% | Expected business behaviour |
-| Negative quantities | 10,624 | 2.0% | Mostly valid (cancellations) |
-| Zero-price items | 2,515 | 0.5% | Possible data issue |
-| Negative prices | 2 | <0.01% | Definite data issue |
-
-> Key insight: **24.9% missing CustomerID is not a bug** — it represents anonymous/guest transactions, which is normal for online retail. The profiler documents this so we don't incorrectly penalise it in the quality score.
+The pipeline DAG is defined in [`dags/datatrust_pipeline.py`](file:///C:/Users/madhan/OneDrive/Desktop/DataTrust/dags/datatrust_pipeline.py) with 4 sequential tasks:
+```
+[extract_transform_load] ──▶ [quality_validation] ──▶ [health_scoring_and_persistence] ──▶ [anomaly_detection]
+```
+All tasks use modular callables referencing core `src/` modules, allowing direct execution and testing even outside of an Airflow cluster.
 
 ---
 
-## Build Milestones
+## Testing & Quality Assurance
 
-- [x] **Phase 1** — Environment, project structure, dataset profiling
-- [x] **Phase 2** — Data quality validation engine
-- [x] **Phase 3** — Explainable Data Health Score
-- [x] **Phase 4** — PostgreSQL historical quality storage
-- [x] **Phase 5** — Lossless ETL pipeline
-- [ ] Phase 6 — Apache Airflow orchestration
-- [ ] Phase 8 — FastAPI backend
-- [ ] Phase 9 — Streamlit dashboard
-- [ ] Phase 10 — Schema drift detection
-- [ ] Phase 11 — Volume/freshness anomaly detection
-- [ ] Phase 12 — Pipeline observability
-- [ ] Phase 13 — Data lineage
-- [ ] Phase 14 — Pytest testing suite
-- [ ] Phase 15 — Docker/Docker Compose
-- [ ] Phase 16 — GitHub Actions CI/CD
-- [ ] Phase 17 — AWS deployment (optional)
+Run the complete test suite with Pytest:
+```bash
+pytest -v
+```
+All 64 unit tests use in-memory SQLite fixtures with zero external database requirements:
+- `test_profiler.py` — Profiling stats and null calculation
+- `test_quality.py` — Schema, completeness, validity, uniqueness rules
+- `test_scorer.py` — Scoring formulas, weights, and tier classification
+- `test_database.py` — SQLAlchemy ORM models, relations, and repository queries
+- `test_etl.py` — Extractor, Transformer, Batch Loader, and Error handling
+- `test_anomaly.py` — Statistical anomaly detection, baseline history, and business rules
+- `test_orchestration.py` — Airflow DAG task callables, sequential execution, and failure bubbling
 
 ---
 
-## Environment Issues Encountered & Fixed
+## Continuous Integration (GitHub Actions)
 
-### numpy 1.26.4 incompatible with Python 3.13
-**Problem:** numpy 1.26.x has no pre-built wheel for Python 3.13. Pip tried to compile from source and failed because no C compiler (gcc/cl.exe) was found.
-
-**Fix:** Use `numpy>=2.1.3` which ships official Python 3.13 wheels.
-
-### UnicodeEncodeError on Windows terminal
-**Problem:** Windows PowerShell uses cp1252 encoding by default. Unicode emoji (✓, ❌) caused `charmap` encode errors.
-
-**Fix:** Set `sys.stdout` to UTF-8 at script startup. Replaced remaining emojis with plain ASCII markers.
-
----
-
-## License
-
-Dataset: UCI Machine Learning Repository — CC BY 4.0
-Project code: MIT
+Every pull request and push to `main` triggers `.github/workflows/ci.yml`:
+1. Sets up Python 3.13 environment
+2. Installs pinned dependencies from `requirements.txt`
+3. Sets in-memory test database environment (`sqlite+pysqlite:///:memory:`)
+4. Runs full test suite (`pytest -v`)

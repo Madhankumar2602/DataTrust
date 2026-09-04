@@ -171,8 +171,9 @@ def _build_records(dataframe: pd.DataFrame) -> list[dict]:
         None,
     )
 
-    records["invoice_date"] = pd.to_datetime(
-        records["invoice_date"]
-    ).dt.to_pydatetime()
+    records["invoice_date"] = [
+        ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+        for ts in pd.to_datetime(records["invoice_date"])
+    ]
 
     return records.to_dict(orient="records")

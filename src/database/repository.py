@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, selectinload
 
-from src.database.models import PipelineRun, QualityResult
+from src.database.models import AnomalyResult, PipelineRun, QualityResult
+
+if TYPE_CHECKING:
+    from src.anomaly.detector import AnomalyDetectionResult
 
 
 def _parse_timestamp(value: str | None, fallback: datetime) -> datetime:
@@ -45,11 +48,19 @@ class QualityRepository:
         """Return the most recently stored run with its quality results."""
         return self.session.scalar(self._runs_query().order_by(PipelineRun.run_id.desc()).limit(1))
 
+    def get_run(self, run_id: int) -> PipelineRun | None:
+        """Return one stored pipeline run by ID with its quality results."""
+        return self.session.scalar(self._runs_query().where(PipelineRun.run_id == run_id))
+
     def get_recent_runs(self, limit: int = 10) -> list[PipelineRun]:
         """Return newest pipeline runs, bounded to a safe positive limit."""
         if limit < 1:
             raise ValueError("limit must be at least 1")
         return list(self.session.scalars(self._runs_query().order_by(PipelineRun.run_id.desc()).limit(limit)))
+
+    def get_runs(self, limit: int = 10) -> list[PipelineRun]:
+        """Alias for get_recent_runs."""
+        return self.get_recent_runs(limit=limit)
 
     def get_quality_results(self, run_id: int) -> list[QualityResult]:
         """Return individual results for one stored pipeline run."""
@@ -70,6 +81,43 @@ class QualityRepository:
     def get_warning_checks(self, run_id: int | None = None) -> list[QualityResult]:
         """Return WARNING quality results, optionally limited to a run."""
         return self._results_by_status("WARNING", run_id)
+
+    def save_anomalies(self, anomalies: list[AnomalyDetectionResult]) -> list[AnomalyResult]:
+        """Persist a list of detected anomalies and return the saved ORM rows."""
+        if not anomalies:
+            return []
+        rows = [
+            AnomalyResult(
+                metric=a.metric,
+                period=a.period,
+                value=a.value,
+                expected_value=a.expected,
+                deviation_pct=a.deviation_pct,
+                severity=a.severity,
+                message=a.message,
+            )
+            for a in anomalies
+        ]
+        try:
+            self.session.add_all(rows)
+            self.session.commit()
+            for row in rows:
+                self.session.refresh(row)
+            return rows
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def get_anomalies(self, limit: int = 50) -> list[AnomalyResult]:
+        """Return the most recently detected anomalies, newest first."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        statement = (
+            select(AnomalyResult)
+            .order_by(AnomalyResult.anomaly_id.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
 
     def _runs_query(self) -> Select[tuple[PipelineRun]]:
         return select(PipelineRun).options(selectinload(PipelineRun.quality_results))

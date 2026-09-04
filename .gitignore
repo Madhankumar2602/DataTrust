@@ -15,9 +15,10 @@ data/*.db
 # Generated processed data
 data/processed/*.parquet
 
-# Python cache
+# Python cache & build artifacts
 __pycache__/
 *.py[cod]
+*.pyo
 .pytest_cache/
 
 # Virtual environment
@@ -26,7 +27,4 @@ venv/
 
 # Generated logs and reports
 logs/*.log
-reports/*.jsondashboard/app_backup.py
-src/etl/loader_backup.py
 reports/*.json
-dashboard/app_backup.py

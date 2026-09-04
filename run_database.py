@@ -1,4 +1,4 @@
-"""Check DATABASE_URL in your untracked .env file and initialize PostgreSQL first."""
+"""Check DATABASE_URL in your untracked .env file and initialize MySQL first."""
 
 from __future__ import annotations
 

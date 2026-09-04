@@ -15,6 +15,11 @@ jobs:
     name: Run DataTrust Tests
     runs-on: ubuntu-latest
 
+    env:
+      DATABASE_URL: "sqlite+pysqlite:///:memory:"
+      PYTHONPATH: "."
+      APP_ENV: "testing"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,6 +35,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run automated tests
-        run: |
-          python -m pytest -v
+      - name: Verify dependency resolution
+        run: pip check
+
+      - name: Run automated test suite
+        run: python -m pytest -v

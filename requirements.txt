@@ -1,50 +1,50 @@
 # =============================================================================
 # DataTrust — Automated Data Quality & Pipeline Observability Platform
-# requirements.txt — DataTrust project dependencies
+# requirements.txt — direct runtime and test dependencies
 # =============================================================================
 # Install with:  pip install -r requirements.txt
 #
-# NOTE on Python 3.13 compatibility:
-#   numpy 1.26.x does NOT ship pre-built wheels for Python 3.13 and would
-#   require a C compiler to build from source.  We use numpy>=2.1 which has
-#   official Python 3.13 wheels and is API-compatible for our use cases.
+# Every package below is imported by this project's code, or is the database
+# driver named in DATABASE_URL. Versions are pinned to the exact set verified
+# green against the full test suite (73 tests) on Python 3.13, so CI, Docker
+# and a fresh local venv all resolve to the same environment.
+#
+# NOTE on Python 3.13: numpy 1.26.x ships no pre-built wheels for 3.13 and
+# would require a C compiler. numpy 2.x has official 3.13 wheels and is
+# API-compatible with this project's usage.
 # =============================================================================
 
 # --- Core data processing ---
 pandas==2.2.3
-numpy>=2.1.3              # 2.x series has Python 3.13 pre-built wheels
-openpyxl==3.1.5           # Read .xlsx Excel files
-# pyarrow>=15.0.0         # Add when Phase 5 needs Parquet pipeline outputs
+numpy==2.5.2
+openpyxl==3.1.5           # engine for pd.read_excel() in src/ingestion/loader.py
 
 # --- Environment & config ---
-python-dotenv>=1.0.1      # Load .env files into environment variables
+python-dotenv==1.2.3      # loads .env into environment variables (src/config.py)
 
-# --- Data validation / reporting (later phases) ---
-# pydantic>=2.9.2         # Consider when object-model validation is required
-# jinja2>=3.1.4           # HTML report templates
+# --- Database ---
+SQLAlchemy==2.0.36        # ORM, models, repository layer (src/database/)
+mysql-connector-python==26.7.0   # driver for mysql+mysqlconnector:// in DATABASE_URL
 
-# =============================================================================
-# Packages added in later phases (commented out until needed):
-# =============================================================================
-
-# --- Database (Phase 4) ---
-sqlalchemy==2.0.36
-mysql-connector-python>=9.0.0
-
-# --- API (Phase 8) ---
-# fastapi==0.115.4
-# uvicorn==0.32.1
-# httpx==0.27.2
+# --- API (Phase 9) ---
+fastapi==0.115.4
+uvicorn[standard]==0.32.1
+pydantic==2.13.5
 
 # --- Dashboard ---
 streamlit==1.40.1
 plotly==5.24.1
 
 # --- Testing ---
-# Tests are needed from Phase 1 onward, so keep them in the reproducible
-# development environment instead of relying on a globally installed pytest.
 pytest==8.3.3
-# pytest-cov==6.0.0
+httpx==0.27.2             # required by fastapi.testclient.TestClient
 
-# --- Orchestration (Phase 7) ---
-# apache-airflow==2.10.3   NOTE: Install via constraints file, not plain pip
+# --- Orchestration (Phase 7, local development only) ---
+# Airflow is intentionally NOT installed here: it pins its own dependency set
+# and would constrain the versions above. The DAG in dags/ imports Airflow
+# inside a try/except so its task callables stay importable and testable
+# without it. Airflow 2.10.3 supports Python 3.8-3.12, so install it in a
+# SEPARATE environment from this project's 3.13 venv, using the official
+# constraints file for that interpreter:
+#   pip install "apache-airflow==2.10.3" \
+#     --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.12.txt"
