@@ -4,7 +4,7 @@ scorer.py — Data Health Score calculator for DataTrust.
 What is the Data Health Score?
 ──────────────────────────────
 It is a transparent 0-100 score representing the trustworthiness of the dataset.
-It takes the raw results from the QualityEngine (schema, completeness, etc.) 
+It takes the raw results from the QualityEngine (schema, completeness, etc.)
 and converts them into a weighted score based on rules defined in config.py.
 """
 
@@ -53,7 +53,7 @@ class HealthScorer:
         logger.info("Calculating Data Health Score...")
 
         results = quality_report.get("results", [])
-        
+
         # 1. Check for critical schema failures
         if self._has_critical_schema_failure(results):
             logger.error("CRITICAL SCHEMA FAILURE DETECTED. Score set to 0.")
@@ -63,14 +63,14 @@ class HealthScorer:
 
         # 2. Group results by category
         grouped_results = self._group_results_by_category(results)
-        
+
         # 3. Calculate category scores
         category_scores = {}
         total_score = 0.0
 
         for category, max_score in self.weights.items():
             checks_in_category = grouped_results.get(category, [])
-            
+
             if not checks_in_category:
                 category_scores[category] = {
                     "score": 0.0,
@@ -88,11 +88,11 @@ class HealthScorer:
                     elif status == "WARNING":
                         points_earned += 0.5
                     # FAIL gets 0.0 points
-                
+
                 # Normalize to max_score
                 category_percentage = points_earned / len(checks_in_category)
                 actual_score = round(category_percentage * max_score, 2)
-                
+
                 category_scores[category] = {
                     "score": actual_score,
                     "max_score": max_score,
@@ -110,7 +110,7 @@ class HealthScorer:
 
         final_score = round(total_score, 2)
         status_label = self._determine_status(final_score)
-        
+
         logger.info(f"Final Score: {final_score}/100 ({status_label})")
 
         return {
@@ -130,11 +130,17 @@ class HealthScorer:
     def _has_critical_schema_failure(self, results: list[dict[str, Any]]) -> bool:
         """Return True if any schema check failed with CRITICAL severity."""
         for r in results:
-            if r.get("category") == "schema" and r.get("status") == "FAIL" and r.get("severity") == "CRITICAL":
+            if (
+                r.get("category") == "schema"
+                and r.get("status") == "FAIL"
+                and r.get("severity") == "CRITICAL"
+            ):
                 return True
         return False
 
-    def _group_results_by_category(self, results: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    def _group_results_by_category(
+        self, results: list[dict[str, Any]]
+    ) -> dict[str, list[dict[str, Any]]]:
         """Group the flat list of CheckResults by their category."""
         grouped: dict[str, list[dict[str, Any]]] = {}
         for r in results:
@@ -183,7 +189,7 @@ class HealthScorer:
                 "details": reason,
                 "included_checks": [],
             }
-            
+
         return {
             "score": 0.0,
             "status": "Critical",

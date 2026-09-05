@@ -34,15 +34,47 @@ def quality_report():
         "validated_at": "2026-08-25T12:00:00+00:00",
         "total_rows": 3,
         "results": [
-            {"check_name": "column_presence", "category": "schema", "status": "PASS", "severity": "INFO", "affected_rows": 0, "affected_percentage": 0.0, "message": "Schema matches."},
-            {"check_name": "duplicate_rows", "category": "uniqueness", "status": "WARNING", "severity": "MEDIUM", "affected_rows": 1, "affected_percentage": 33.33, "message": "Duplicate found."},
-            {"check_name": "unit_price_validity", "category": "validity", "status": "FAIL", "severity": "HIGH", "affected_rows": 1, "affected_percentage": 33.33, "message": "Negative price."},
+            {
+                "check_name": "column_presence",
+                "category": "schema",
+                "status": "PASS",
+                "severity": "INFO",
+                "affected_rows": 0,
+                "affected_percentage": 0.0,
+                "message": "Schema matches.",
+            },
+            {
+                "check_name": "duplicate_rows",
+                "category": "uniqueness",
+                "status": "WARNING",
+                "severity": "MEDIUM",
+                "affected_rows": 1,
+                "affected_percentage": 33.33,
+                "message": "Duplicate found.",
+            },
+            {
+                "check_name": "unit_price_validity",
+                "category": "validity",
+                "status": "FAIL",
+                "severity": "HIGH",
+                "affected_rows": 1,
+                "affected_percentage": 33.33,
+                "message": "Negative price.",
+            },
         ],
     }
 
 
 def test_model_creation(repository):
-    run = PipelineRun(pipeline_name="test", started_at=datetime.now(timezone.utc), finished_at=datetime.now(timezone.utc), duration_seconds=0.0, status="COMPLETED", rows_processed=0, health_score=100.0)
+    run = PipelineRun(
+        pipeline_name="test",
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+        duration_seconds=0.0,
+        status="COMPLETED",
+        rows_processed=0,
+        health_score=100.0,
+    )
     repository.session.add(run)
     repository.session.commit()
     assert run.run_id is not None
@@ -60,7 +92,18 @@ def test_relationship_and_foreign_key(repository, quality_report):
     run = repository.save_run(quality_report, {"score": 72.5})
     assert len(run.quality_results) == 3
     assert run.quality_results[0].pipeline_run.run_id == run.run_id
-    repository.session.add(QualityResult(run_id=9999, check_name="orphan", category="test", status="FAIL", severity="HIGH", affected_rows=1, affected_percentage=1.0, message="Must fail."))
+    repository.session.add(
+        QualityResult(
+            run_id=9999,
+            check_name="orphan",
+            category="test",
+            status="FAIL",
+            severity="HIGH",
+            affected_rows=1,
+            affected_percentage=1.0,
+            message="Must fail.",
+        )
+    )
     with pytest.raises(IntegrityError):
         repository.session.commit()
     repository.session.rollback()

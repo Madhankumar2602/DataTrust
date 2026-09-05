@@ -1051,7 +1051,10 @@ elif page == "Anomalies":
     for _, row in filtered.iterrows():
         direction = "↑" if row["deviation_pct"] > 0 else "↓"
         pct = abs(float(row["deviation_pct"]))
-        label = f"{row['severity']} | {row['metric'].title()} | {row['period']} | {direction}{pct:.1f}%"
+        label = (
+            f"{row['severity']} | {row['metric'].title()} | "
+            f"{row['period']} | {direction}{pct:.1f}%"
+        )
         detail = (
             f"**Value:** {float(row['value']):,.2f}  \n"
             f"**Expected:** {float(row['expected_value']):,.2f}  \n"

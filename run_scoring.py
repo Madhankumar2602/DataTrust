@@ -56,12 +56,12 @@ def main() -> None:
     print("\n[3/4] Calculating Data Health Score ...")
     scorer = HealthScorer()
     score_report = scorer.calculate_score(quality_report)
-    
+
     # Save the score report alongside the quality report
     score_path = Path(settings.REPORTS_PATH) / "health_score_latest.json"
     with open(score_path, "w", encoding="utf-8") as f:
         json.dump(score_report, f, indent=2)
-        
+
     print(f"      [OK] Score calculated and saved to: {score_path}")
 
     # ── Step 4: Print human-readable summary ──────────────────────────────
@@ -77,24 +77,24 @@ def main() -> None:
 def print_summary(report: dict) -> None:
     """Print a clean, human-readable version of the score report."""
     print("\nDATATRUST DATA HEALTH SCORE\n")
-    
+
     if "failure_reason" in report:
         print(f"  CRITICAL FAILURE: {report['failure_reason']}")
         print(f"  OVERALL SCORE: {report['score']}/100")
         return
-        
+
     score = report["score"]
     status = report["status"]
-    
+
     print(f"  OVERALL SCORE: {score}/100  ({status})")
     print("\n  Category Breakdown:")
     print("  -------------------")
-    
+
     for category, details in report["category_scores"].items():
         cat_score = details["score"]
         max_score = details["max_score"]
         cat_name = category.title()
-        
+
         print(f"  {cat_name:<15}: {cat_score:>5.1f} / {max_score:<5.1f}  - {details['details']}")
 
 

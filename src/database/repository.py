@@ -27,16 +27,53 @@ class QualityRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def save_run(self, quality_report: dict[str, Any], score_report: dict[str, Any], pipeline_name: str = "online_retail_quality_pipeline", started_at: datetime | None = None, finished_at: datetime | None = None, status: str = "COMPLETED") -> PipelineRun:
+    def save_run(
+        self,
+        quality_report: dict[str, Any],
+        score_report: dict[str, Any],
+        pipeline_name: str = "online_retail_quality_pipeline",
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+        status: str = "COMPLETED",
+    ) -> PipelineRun:
         """Atomically save one pipeline run and all of its quality results."""
         finished = finished_at or datetime.now(timezone.utc)
         started = started_at or _parse_timestamp(quality_report.get("validated_at"), finished)
         duration = max((finished - started).total_seconds(), 0.0)
-        pipeline_run = PipelineRun(pipeline_name=pipeline_name, started_at=started, finished_at=finished, duration_seconds=round(duration, 4), status=status, rows_processed=int(quality_report.get("total_rows", 0)), health_score=float(score_report.get("score", 0.0)), health_status=score_report.get("status"), category_scores=score_report.get("category_scores"))
+        pipeline_run = PipelineRun(
+            pipeline_name=pipeline_name,
+            started_at=started,
+            finished_at=finished,
+            duration_seconds=round(duration, 4),
+            status=status,
+            rows_processed=int(quality_report.get("total_rows", 0)),
+            health_score=float(score_report.get("score", 0.0)),
+            health_status=score_report.get("status"),
+            category_scores=score_report.get("category_scores"),
+        )
         try:
             self.session.add(pipeline_run)
             self.session.flush()
-            self.session.add_all([QualityResult(run_id=pipeline_run.run_id, check_name=result.get("check_name", "unknown"), category=result.get("category", "unknown"), status=result.get("status", "UNKNOWN"), severity=result.get("severity", "INFO"), affected_rows=int(result.get("affected_rows", 0)), affected_percentage=float(result.get("affected_percentage", result.get("affected_pct", 0.0))), message=result.get("message", "")) for result in quality_report.get("results", [])])
+            self.session.add_all(
+                [
+                    QualityResult(
+                        run_id=pipeline_run.run_id,
+                        check_name=result.get("check_name", "unknown"),
+                        category=result.get("category", "unknown"),
+                        status=result.get("status", "UNKNOWN"),
+                        severity=result.get("severity", "INFO"),
+                        affected_rows=int(result.get("affected_rows", 0)),
+                        affected_percentage=float(
+                            result.get(
+                                "affected_percentage",
+                                result.get("affected_pct", 0.0),
+                            )
+                        ),
+                        message=result.get("message", ""),
+                    )
+                    for result in quality_report.get("results", [])
+                ]
+            )
             self.session.commit()
             self.session.refresh(pipeline_run)
             return pipeline_run
@@ -76,7 +113,11 @@ class QualityRepository:
 
     def get_quality_results(self, run_id: int) -> list[QualityResult]:
         """Return individual results for one stored pipeline run."""
-        statement = select(QualityResult).where(QualityResult.run_id == run_id).order_by(QualityResult.result_id)
+        statement = (
+            select(QualityResult)
+            .where(QualityResult.run_id == run_id)
+            .order_by(QualityResult.result_id)
+        )
         return list(self.session.scalars(statement))
 
     def get_health_score_history(self, limit: int = 30) -> list[PipelineRun]:

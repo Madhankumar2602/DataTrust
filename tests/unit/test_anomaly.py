@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.anomaly.detector import AnomalyDetectionResult, AnomalyDetector
+from src.anomaly.detector import AnomalyDetector
 from src.anomaly.rules import classify_anomaly
 
 
@@ -35,9 +35,17 @@ def _make_cancellation_df(rates: list[float], start: str = "2010-01") -> pd.Data
         n = 10  # transactions per month
         n_cancel = round(rate * n)
         for i in range(n_cancel):
-            rows.append({"invoice_date": base_date + pd.to_timedelta(i, unit="D"), "revenue": -1.0, "is_cancellation": True})
+            rows.append({
+                "invoice_date": base_date + pd.to_timedelta(i, unit="D"),
+                "revenue": -1.0,
+                "is_cancellation": True,
+            })
         for i in range(n - n_cancel):
-            rows.append({"invoice_date": base_date + pd.to_timedelta(i, unit="D"), "revenue": 10.0, "is_cancellation": False})
+            rows.append({
+                "invoice_date": base_date + pd.to_timedelta(i, unit="D"),
+                "revenue": 10.0,
+                "is_cancellation": False,
+            })
     return pd.DataFrame(rows)
 
 
@@ -69,7 +77,11 @@ def test_transaction_anomaly():
     for period, count in zip(periods, normal_counts + [spike_count]):
         base_date = period.to_timestamp()
         for i in range(count):
-            rows.append({"invoice_date": base_date + pd.to_timedelta(i, unit="D"), "revenue": 10.0, "is_cancellation": False})
+            rows.append({
+                "invoice_date": base_date + pd.to_timedelta(i, unit="D"),
+                "revenue": 10.0,
+                "is_cancellation": False,
+            })
     df = pd.DataFrame(rows)
     detector = AnomalyDetector(z_threshold=2.0)
     results = detector.detect(df, "transactions")

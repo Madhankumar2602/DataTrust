@@ -4,7 +4,7 @@ engine.py — Main Data Quality Engine for DataTrust.
 What does the engine do?
 ────────────────────────
 It orchestrates the various quality checks (Schema, Completeness, Validity, Uniqueness).
-Instead of calling them one by one, you just pass a DataFrame to the Engine, 
+Instead of calling them one by one, you just pass a DataFrame to the Engine,
 and it runs the entire suite, returning a consolidated report.
 """
 
@@ -49,9 +49,9 @@ class QualityEngine:
         """
         logger.info(f"Starting Data Quality Validation for {self.dataset_name}...")
         start_time = datetime.now(timezone.utc)
-        
+
         all_results: list[CheckResult] = []
-        
+
         for check in self.checks:
             try:
                 results = check.run(df)
@@ -72,9 +72,9 @@ class QualityEngine:
                         metadata={"exception_type": type(exc).__name__},
                     )
                 )
-                
+
         end_time = datetime.now(timezone.utc)
-        
+
         # Build the final structured report
         report = {
             "dataset_name": self.dataset_name,
@@ -90,7 +90,7 @@ class QualityEngine:
             },
             "results": [r.to_dict() for r in all_results],
         }
-        
+
         logger.info("Validation complete.")
         return report
 

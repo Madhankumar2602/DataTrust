@@ -5,7 +5,6 @@ routes.py — REST API endpoint definitions for DataTrust.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -91,7 +90,11 @@ def get_latest_health_score(
         warnings=warnings,
         failed=failed,
         category_scores=latest_run.category_scores,
-        evaluated_at=latest_run.started_at.isoformat() if latest_run.started_at else datetime.now(timezone.utc).isoformat(),
+        evaluated_at=(
+            latest_run.started_at.isoformat()
+            if latest_run.started_at
+            else datetime.now(timezone.utc).isoformat()
+        ),
     )
 
 

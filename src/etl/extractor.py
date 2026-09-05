@@ -29,6 +29,17 @@ def extract_data(source_path: str | Path | None = None) -> ExtractionResult:
     started = perf_counter()
     logger.info("[EXTRACT] Starting extraction from %s", source_path or "configured raw path")
     dataframe = load_csv(source_path)
-    result = ExtractionResult(dataframe, Path(source_path) if source_path else Path(settings.RAW_DATA_PATH), len(dataframe), len(dataframe.columns), round(perf_counter() - started, 4))
-    logger.info("[EXTRACT] SUCCESS rows=%s columns=%s duration=%.4fs", result.rows_extracted, result.columns_extracted, result.duration_seconds)
+    result = ExtractionResult(
+        dataframe,
+        Path(source_path) if source_path else Path(settings.RAW_DATA_PATH),
+        len(dataframe),
+        len(dataframe.columns),
+        round(perf_counter() - started, 4),
+    )
+    logger.info(
+        "[EXTRACT] SUCCESS rows=%s columns=%s duration=%.4fs",
+        result.rows_extracted,
+        result.columns_extracted,
+        result.duration_seconds,
+    )
     return result

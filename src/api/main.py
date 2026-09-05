@@ -12,7 +12,6 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.api.routes import router
-from src.config import settings
 from src.logger import get_logger
 
 logger = get_logger("api")

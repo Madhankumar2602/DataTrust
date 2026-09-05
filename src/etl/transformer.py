@@ -42,13 +42,22 @@ def transform_data(dataframe: pd.DataFrame) -> TransformationResult:
 
     invalid_dates = parsed_dates.isna() & transformed["InvoiceDate"].notna()
     if invalid_dates.any():
-        raise TransformationError(f"InvoiceDate contains {int(invalid_dates.sum())} unparseable non-null value(s).")
+        raise TransformationError(
+            f"InvoiceDate contains {int(invalid_dates.sum())} "
+            "unparseable non-null value(s)."
+        )
 
     # Store normalized dates as ISO strings so the existing Phase 2 schema
     # contract remains valid while every value has been parsed consistently.
     transformed["InvoiceDate"] = parsed_dates.dt.strftime("%Y-%m-%dT%H:%M:%S")
-    transformed["IsCancellation"] = transformed["InvoiceNo"].astype(str).str.startswith("C", na=False)
+    transformed["IsCancellation"] = (
+        transformed["InvoiceNo"].astype(str).str.startswith("C", na=False)
+    )
     transformed["Revenue"] = transformed["Quantity"] * transformed["UnitPrice"]
     result = TransformationResult(transformed, len(transformed), round(perf_counter() - started, 4))
-    logger.info("[TRANSFORM] SUCCESS rows=%s duration=%.4fs", result.rows_transformed, result.duration_seconds)
+    logger.info(
+        "[TRANSFORM] SUCCESS rows=%s duration=%.4fs",
+        result.rows_transformed,
+        result.duration_seconds,
+    )
     return result

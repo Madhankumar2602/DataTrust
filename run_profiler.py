@@ -20,7 +20,6 @@ import sys
 # Force stdout to utf-8 so Unicode box-drawing characters work on Windows.
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-import json
 from pathlib import Path
 
 # Make sure Python can find the 'src' package when running from project root
@@ -74,7 +73,7 @@ def main() -> None:
 def print_summary(report: dict) -> None:
     """Print a clean, human-readable version of the profile report."""
 
-    ov  = report["overview"]
+    ov = report["overview"]
     mv = report["missing_values"]
     dup = report["duplicates"]
     dates = report["date_analysis"]
@@ -130,10 +129,16 @@ def print_summary(report: dict) -> None:
     if "invoices" in biz:
         iv = biz["invoices"]
         print(f"     Unique invoices:     {iv['unique_invoices']:>10,}")
-        print(f"     Cancellations:       {iv['cancellation_invoices']:>10,} ({iv['cancellation_percentage']:.1f}%)")
+        print(
+            f"     Cancellations:       {iv['cancellation_invoices']:>10,} "
+            f"({iv['cancellation_percentage']:.1f}%)"
+        )
     if "quantity" in biz:
         q = biz["quantity"]
-        print(f"     Negative qty rows:   {q['negative_quantity_rows']:>10,}  (expected: cancellations)")
+        print(
+            f"     Negative qty rows:   {q['negative_quantity_rows']:>10,}  "
+            "(expected: cancellations)"
+        )
         print(f"     Zero qty rows:       {q['zero_quantity_rows']:>10,}")
         print(f"     Qty range:           {q['min_quantity']:,} → {q['max_quantity']:,}")
     if "unit_price" in biz:

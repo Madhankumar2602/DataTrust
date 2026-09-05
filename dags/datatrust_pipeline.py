@@ -277,7 +277,10 @@ try:
     with DAG(
         dag_id="datatrust_pipeline",
         default_args=DEFAULT_ARGS,
-        description="DataTrust Automated Data Quality, Observability, and Anomaly Detection Pipeline",
+        description=(
+            "DataTrust Automated Data Quality, Observability, "
+            "and Anomaly Detection Pipeline"
+        ),
         schedule_interval="@daily",
         catchup=False,
         tags=["datatrust", "quality", "observability", "etl", "anomaly"],
@@ -286,13 +289,19 @@ try:
         task_etl = PythonOperator(
             task_id="extract_transform_load",
             python_callable=run_extract_transform_load,
-            doc_md="Extracts raw CSV, normalizes types, and loads snapshot to MySQL retail_transactions.",
+            doc_md=(
+                "Extracts raw CSV, normalizes types, and loads snapshot "
+                "to MySQL retail_transactions."
+            ),
         )
 
         task_quality = PythonOperator(
             task_id="quality_validation",
             python_callable=run_quality_validation,
-            doc_md="Evaluates completeness, schema, validity, and uniqueness on the loaded dataset.",
+            doc_md=(
+                "Evaluates completeness, schema, validity, and uniqueness "
+                "on the loaded dataset."
+            ),
         )
 
         task_scoring = PythonOperator(
@@ -304,7 +313,10 @@ try:
         task_anomaly = PythonOperator(
             task_id="anomaly_detection",
             python_callable=run_anomaly_detection,
-            doc_md="Detects monthly statistical deviations and persists anomalies to MySQL anomaly_results.",
+            doc_md=(
+                "Detects monthly statistical deviations and persists "
+                "anomalies to MySQL anomaly_results."
+            ),
         )
 
         # Strictly ordered pipeline dependency chain

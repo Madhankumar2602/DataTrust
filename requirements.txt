@@ -39,6 +39,9 @@ plotly==5.24.1
 pytest==8.3.3
 httpx==0.27.2             # required by fastapi.testclient.TestClient
 
+# --- Code quality ---
+flake8==7.1.1             # CI lint gate; configuration lives in setup.cfg
+
 # --- Orchestration (Phase 7, local development only) ---
 # Airflow is intentionally NOT installed here: it pins its own dependency set
 # and would constrain the versions above. The DAG in dags/ imports Airflow

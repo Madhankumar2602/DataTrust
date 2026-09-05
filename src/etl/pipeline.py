@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any
 
 from src.database.connection import create_database_engine, create_session_factory
 from src.database.models import Base
@@ -39,7 +38,11 @@ class ETLPipelineResult:
     error_message: str | None = None
 
 
-def run_etl_pipeline(source_path: str | Path | None = None, database_url: str | None = None, pipeline_name: str = "online_retail_etl") -> ETLPipelineResult:
+def run_etl_pipeline(
+    source_path: str | Path | None = None,
+    database_url: str | None = None,
+    pipeline_name: str = "online_retail_etl",
+) -> ETLPipelineResult:
     """Run the complete ETL flow; data-quality findings do not fail execution."""
     started_at = datetime.now(timezone.utc)
     timer = perf_counter()
@@ -53,7 +56,11 @@ def run_etl_pipeline(source_path: str | Path | None = None, database_url: str | 
         transformation = transform_data(extraction.dataframe)
         counts["transformed"] = transformation.rows_transformed
         if counts["transformed"] != counts["extracted"]:
-            logger.warning("[TRANSFORM] Row-count change extracted=%s transformed=%s", counts["extracted"], counts["transformed"])
+            logger.warning(
+                "[TRANSFORM] Row-count change extracted=%s transformed=%s",
+                counts["extracted"],
+                counts["transformed"],
+            )
 
         stage = "LOAD"
         engine = create_database_engine(database_url)
@@ -64,25 +71,38 @@ def run_etl_pipeline(source_path: str | Path | None = None, database_url: str | 
             counts["loaded"] = load_result.rows_loaded
 
             stage = "VALIDATE"
-            quality_report = QualityEngine("UCI Online Retail Transformed").run(transformation.dataframe)
+            quality_report = QualityEngine("UCI Online Retail Transformed").run(
+                transformation.dataframe
+            )
             stage = "SCORE"
             score_report = HealthScorer().calculate_score(quality_report)
 
             stage = "PERSIST"
             stored_run = QualityRepository(session).save_run(
-                quality_report, score_report, pipeline_name, started_at, datetime.now(timezone.utc), "SUCCESS"
+                quality_report,
+                score_report,
+                pipeline_name,
+                started_at,
+                datetime.now(timezone.utc),
+                "SUCCESS",
             )
 
         finished_at = datetime.now(timezone.utc)
         return ETLPipelineResult(
             pipeline_name, "SUCCESS", started_at, finished_at, round(perf_counter() - timer, 4),
             counts["extracted"], counts["transformed"], counts["loaded"], score_report["score"],
-            quality_report["summary"]["failed"], quality_report["summary"]["warnings"], stored_run.run_id,
+            quality_report["summary"]["failed"],
+            quality_report["summary"]["warnings"],
+            stored_run.run_id,
         )
     except Exception as exc:
         finished_at = datetime.now(timezone.utc)
         logger.exception("[%s] ETL pipeline failed: %s", stage, exc)
         return ETLPipelineResult(
             pipeline_name, "FAILED", started_at, finished_at, round(perf_counter() - timer, 4),
-            counts["extracted"], counts["transformed"], counts["loaded"], error_stage=stage, error_message=str(exc),
+            counts["extracted"],
+            counts["transformed"],
+            counts["loaded"],
+            error_stage=stage,
+            error_message=str(exc),
         )

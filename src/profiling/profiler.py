@@ -285,7 +285,9 @@ class DataProfiler:
             zero_qty = qty == 0
             # Negative quantities on NON-cancellation rows = potential issue
             non_cancel = ~self.df["InvoiceNo"].astype(str).str.startswith("C")
-            suspicious_negative = (neg_qty & non_cancel).sum() if "InvoiceNo" in self.df.columns else 0
+            suspicious_negative = (
+                (neg_qty & non_cancel).sum() if "InvoiceNo" in self.df.columns else 0
+            )
 
             result["quantity"] = {
                 "negative_quantity_rows": int(neg_qty.sum()),

@@ -132,6 +132,9 @@ def test_orchestration_tasks_flow_isolated(mock_db):
 
 def test_etl_failure_bubbles_up():
     """Verify that if ETL extraction fails, the task raises an exception."""
-    with patch("dags.datatrust_pipeline.extract_data", side_effect=FileNotFoundError("Source CSV missing")):
+    with patch(
+        "dags.datatrust_pipeline.extract_data",
+        side_effect=FileNotFoundError("Source CSV missing"),
+    ):
         with pytest.raises(FileNotFoundError):
             run_extract_transform_load()

@@ -67,7 +67,7 @@ def main() -> None:
 def print_summary(report: dict) -> None:
     """Print a clean, human-readable version of the validation report."""
     print("\nDATATRUST DATA QUALITY VALIDATION\n")
-    
+
     # Define severity markers for visual clarity
     markers = {
         "PASS": "[OK]  ",
@@ -75,7 +75,7 @@ def print_summary(report: dict) -> None:
         "FAIL": "[FAIL]",
         "INFO": "[INFO]"
     }
-    
+
     # Group results by category
     categories = {}
     for result in report["results"]:
@@ -83,7 +83,7 @@ def print_summary(report: dict) -> None:
         if cat not in categories:
             categories[cat] = []
         categories[cat].append(result)
-        
+
     for cat, results in categories.items():
         print(f"── {cat} ───────────────────────────────────────")
         for r in results:
@@ -93,7 +93,7 @@ def print_summary(report: dict) -> None:
             if r['affected_rows'] > 0:
                 print(f"         Affected: {r['affected_rows']:,} rows ({r['affected_pct']}%)")
         print()
-        
+
     summary = report["summary"]
     print("── Summary ────────────────────────────────────────")
     print(f"  Total Checks: {summary['total_checks']}")

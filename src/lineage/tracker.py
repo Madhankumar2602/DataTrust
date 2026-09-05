@@ -29,7 +29,10 @@ class LineageTracker:
             "transformation": {},
             "load": {}
         }
-        logger.info(f"[Lineage] Started tracking for {dataset_name} (ID: {self.lineage_data['lineage_id']})")
+        logger.info(
+            f"[Lineage] Started tracking for {dataset_name} "
+            f"(ID: {self.lineage_data['lineage_id']})"
+        )
 
     def record_extraction(self, source_path: str | Path, row_count: int):
         """Record details about the data extraction phase."""
@@ -56,7 +59,7 @@ class LineageTracker:
     def save_lineage(self) -> Path:
         """
         Save the lineage metadata as a JSON file alongside the output file.
-        
+
         Example:
         If output is `data/processed/clean_online_retail.parquet`,
         lineage is saved as `data/processed/clean_online_retail.lineage.json`.
@@ -65,7 +68,7 @@ class LineageTracker:
             raise ValueError("Cannot save lineage: output_path has not been recorded.")
 
         output_path = Path(self.lineage_data["load"]["output_path"])
-        
+
         # Create sidecar filename
         lineage_filename = output_path.stem + ".lineage.json"
         lineage_path = output_path.parent / lineage_filename

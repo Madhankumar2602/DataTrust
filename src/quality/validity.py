@@ -47,10 +47,10 @@ class ValidityCheck(BaseCheck):
 
         if "UnitPrice" in df.columns:
             results.append(self._check_unit_price(df, total_rows))
-        
+
         if "Quantity" in df.columns and "InvoiceNo" in df.columns:
             results.extend(self._check_quantity(df, total_rows))
-            
+
         if "InvoiceDate" in df.columns:
             results.append(self._check_invoice_date(df, total_rows))
 
@@ -62,10 +62,10 @@ class ValidityCheck(BaseCheck):
         price = df["UnitPrice"]
         # Convert to numeric in case of type mismatch (coercing errors to NaN)
         price_num = pd.to_numeric(price, errors="coerce")
-        
+
         negative_count = int((price_num < 0).sum())
         zero_count = int((price_num == 0).sum())
-        
+
         if negative_count > 0:
             return CheckResult(
                 check_name="unit_price_validity",
@@ -76,18 +76,21 @@ class ValidityCheck(BaseCheck):
                 affected_rows=negative_count,
                 affected_pct=round(negative_count / total_rows * 100, 2)
             )
-            
+
         if zero_count > 0:
             return CheckResult(
                 check_name="unit_price_validity",
                 category=self.category,
                 status=CheckStatus.WARNING,
                 severity=Severity.LOW,
-                message=f"UnitPrice is zero in {zero_count} rows. This may indicate free items or missing data.",
+                message=(
+                    f"UnitPrice is zero in {zero_count} rows. "
+                    "This may indicate free items or missing data."
+                ),
                 affected_rows=zero_count,
                 affected_pct=round(zero_count / total_rows * 100, 2)
             )
-            
+
         return CheckResult(
             check_name="unit_price_validity",
             category=self.category,
@@ -100,7 +103,7 @@ class ValidityCheck(BaseCheck):
         results = []
         qty = pd.to_numeric(df["Quantity"], errors="coerce")
         inv = df["InvoiceNo"].astype(str)
-        
+
         # 1. Zero quantity check
         zero_count = int((qty == 0).sum())
         if zero_count > 0:
@@ -109,7 +112,10 @@ class ValidityCheck(BaseCheck):
                 category=self.category,
                 status=CheckStatus.FAIL,
                 severity=Severity.MEDIUM,
-                message=f"Quantity is zero in {zero_count} rows. Transactions must have non-zero quantity.",
+                message=(
+                    f"Quantity is zero in {zero_count} rows. "
+                    "Transactions must have non-zero quantity."
+                ),
                 affected_rows=zero_count,
                 affected_pct=round(zero_count / total_rows * 100, 2)
             ))
@@ -125,7 +131,7 @@ class ValidityCheck(BaseCheck):
         # 2. Cancellation logic check
         is_cancel = inv.str.startswith("C", na=False)
         is_negative = qty < 0
-        
+
         # UCI contains a set of negative, zero-price rows with no CustomerID.
         # Many also have no description. They look like administrative adjustments, not sales or
         # normal C-prefixed cancellations. They remain visible as a warning,
@@ -143,9 +149,9 @@ class ValidityCheck(BaseCheck):
         adjustment_count = int(is_adjustment.sum())
         # Cancellation but NOT a negative qty (unexpected)
         invalid_cancellation = int((is_cancel & ~is_negative).sum())
-        
+
         total_invalid_qty = invalid_negative + invalid_cancellation
-        
+
         if total_invalid_qty > 0:
             results.append(CheckResult(
                 check_name="quantity_cancellation_logic",
@@ -166,7 +172,8 @@ class ValidityCheck(BaseCheck):
                 status=CheckStatus.WARNING,
                 severity=Severity.MEDIUM,
                 message=(
-                    f"Found {adjustment_count} negative, zero-price rows without a 'C' invoice prefix. "
+                    f"Found {adjustment_count} negative, zero-price rows "
+                    "without a 'C' invoice prefix. "
                     "They match an administrative-adjustment pattern and should be investigated."
                 ),
                 affected_rows=adjustment_count,
@@ -180,10 +187,13 @@ class ValidityCheck(BaseCheck):
                 category=self.category,
                 status=CheckStatus.PASS,
                 severity=Severity.INFO,
-                message=f"Cancellation logic is consistent. Found {cancellations} valid cancellations.",
+                message=(
+                    "Cancellation logic is consistent. "
+                    f"Found {cancellations} valid cancellations."
+                ),
                 metadata={"valid_cancellations": cancellations}
             ))
-            
+
         return results
 
     def _check_invoice_date(self, df: pd.DataFrame, total_rows: int) -> CheckResult:
@@ -194,7 +204,7 @@ class ValidityCheck(BaseCheck):
         # (Missing values are handled by CompletenessCheck, not ValidityCheck)
         original_missing = df["InvoiceDate"].isnull()
         parse_errors = int((dates.isnull() & ~original_missing).sum())
-        
+
         if parse_errors > 0:
             return CheckResult(
                 check_name="invoice_date_validity",
@@ -205,7 +215,7 @@ class ValidityCheck(BaseCheck):
                 affected_rows=parse_errors,
                 affected_pct=round(parse_errors / total_rows * 100, 2)
             )
-            
+
         return CheckResult(
             check_name="invoice_date_validity",
             category=self.category,

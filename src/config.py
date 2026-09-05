@@ -103,14 +103,14 @@ class Settings:
 
     @property
     def DATABASE_URL(self) -> str:
-      """Return the database URL supplied through the untracked environment."""
-      database_url = os.getenv("DATABASE_URL")
-      if not database_url:
-         raise ValueError(
-            "DATABASE_URL is not configured. Copy .env.example to .env "
-            "and set your database connection URL."
-        )
-      return database_url
+        """Return the database URL supplied through the untracked environment."""
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError(
+                "DATABASE_URL is not configured. Copy .env.example to .env "
+                "and set your database connection URL."
+            )
+        return database_url
 
     def ensure_directories(self) -> None:
         """Create required directories if they don't already exist."""

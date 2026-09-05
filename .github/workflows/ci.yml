@@ -2,13 +2,8 @@ name: DataTrust CI
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: ['**']
   pull_request:
-    branches:
-      - main
-      - master
 
 jobs:
   test:
@@ -37,6 +32,9 @@ jobs:
 
       - name: Verify dependency resolution
         run: pip check
+
+      - name: Lint with flake8
+        run: python -m flake8 .
 
       - name: Run automated test suite
         run: python -m pytest -v

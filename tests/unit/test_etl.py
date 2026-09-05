@@ -47,7 +47,10 @@ def test_extractor_unreadable_source_fails(tmp_path):
 def test_transformer_is_lossless_and_adds_fields(retail_df):
     result = transform_data(retail_df)
     assert result.rows_transformed == len(retail_df)
-    assert result.dataframe["InvoiceDate"].tolist() == ["2010-12-01T08:26:00", "2010-12-01T08:28:00"]
+    assert result.dataframe["InvoiceDate"].tolist() == [
+        "2010-12-01T08:26:00",
+        "2010-12-01T08:28:00",
+    ]
     assert result.dataframe["IsCancellation"].tolist() == [False, True]
     assert result.dataframe["Revenue"].tolist() == [15.0, -6.0]
 
