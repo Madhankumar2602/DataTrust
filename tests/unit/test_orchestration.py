@@ -161,8 +161,11 @@ def test_orchestration_tasks_flow_isolated(mock_db, lifecycle_db):
         )
         scoring_result = run_health_scoring_and_persistence(ti=task_instance)
 
-        assert scoring_result["health_score"] >= 0.0
-        assert scoring_result["status"] in ["Excellent", "Good", "Poor", "Critical"]
+        # Regression: the stored snapshot read back from the database used to be
+        # validated against the source column names, which reported every column
+        # missing and forced this score to 0.0/Critical on every scheduled run.
+        assert scoring_result["health_score"] > 0.0
+        assert scoring_result["status"] in ["Healthy", "Warning", "Poor", "Critical"]
         # The same run is updated, never a second one.
         assert scoring_result["run_id"] == run_id
 

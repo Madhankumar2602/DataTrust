@@ -69,25 +69,65 @@ class SchemaCheck(BaseCheck):
                               Defaults to settings.EXPECTED_COLUMNS.
             expected_dtypes:  Dict of {column: expected_dtype}.
                               Defaults to settings.EXPECTED_DTYPES.
+
+        Passing either argument pins the check to those expectations. Passing
+        neither lets `run` select the representation the DataFrame is actually
+        in, because the same dataset is validated both as source columns and,
+        after the ETL load, as the stored retail_transactions columns.
         """
+        self._pinned = expected_columns is not None or expected_dtypes is not None
         self.expected_columns = expected_columns or list(settings.EXPECTED_COLUMNS)
         self.expected_dtypes = expected_dtypes or dict(settings.EXPECTED_DTYPES)
 
     def run(self, df: pd.DataFrame) -> list[CheckResult]:
         """Run all three schema sub-checks and return their results."""
         logger.info("Running SchemaCheck ...")
+        representation, expected_columns, expected_dtypes = self._expectations_for(df)
+        logger.info(f"  SchemaCheck: validating the {representation} representation")
         results = [
-            self._check_missing_columns(df),
-            self._check_unexpected_columns(df),
-            self._check_dtype_mismatches(df),
+            self._check_missing_columns(df, expected_columns, representation),
+            self._check_unexpected_columns(df, expected_columns),
+            self._check_dtype_mismatches(df, expected_dtypes),
         ]
         passed = sum(1 for r in results if r.passed)
         logger.info(f"  SchemaCheck: {passed}/{len(results)} sub-checks passed")
         return results
 
+    def _expectations_for(
+        self, df: pd.DataFrame
+    ) -> tuple[str, list[str], dict[str, str]]:
+        """Choose which representation of the dataset this DataFrame holds.
+
+        The pipeline validates the same data twice: as source columns before the
+        load, and as stored retail_transactions columns when a later stage reads
+        the table back. Comparing stored data against source names reported every
+        column as missing, so the check now matches the names it was handed.
+        Ties and unrecognised frames fall back to the source contract, so genuinely
+        broken data still fails loudly instead of selecting itself a passing schema.
+        """
+        if self._pinned:
+            return "configured", self.expected_columns, self.expected_dtypes
+
+        present = set(df.columns)
+        source_matches = len(present & set(self.expected_columns))
+        stored_matches = len(present & set(settings.STORED_EXPECTED_COLUMNS))
+
+        if stored_matches > source_matches:
+            return (
+                "stored",
+                list(settings.STORED_EXPECTED_COLUMNS),
+                dict(settings.STORED_EXPECTED_DTYPES),
+            )
+        return "source", self.expected_columns, self.expected_dtypes
+
     # ── Sub-checks ────────────────────────────────────────────────────────────
 
-    def _check_missing_columns(self, df: pd.DataFrame) -> CheckResult:
+    def _check_missing_columns(
+        self,
+        df: pd.DataFrame,
+        expected_columns: list[str],
+        representation: str,
+    ) -> CheckResult:
         """
         Detect expected columns that are absent from the DataFrame.
 
@@ -95,7 +135,7 @@ class SchemaCheck(BaseCheck):
         that column will crash or produce wrong results.
         """
         actual_cols = set(df.columns)
-        missing = [c for c in self.expected_columns if c not in actual_cols]
+        missing = [c for c in expected_columns if c not in actual_cols]
 
         if not missing:
             return CheckResult(
@@ -104,7 +144,7 @@ class SchemaCheck(BaseCheck):
                 status=CheckStatus.PASS,
                 severity=Severity.INFO,
                 message="All expected columns are present.",
-                metadata={"expected": self.expected_columns},
+                metadata={"expected": expected_columns, "representation": representation},
             )
 
         return CheckResult(
@@ -120,12 +160,15 @@ class SchemaCheck(BaseCheck):
             affected_pct=100.0,
             metadata={
                 "missing_columns": missing,
-                "expected": self.expected_columns,
+                "expected": expected_columns,
                 "actual": list(df.columns),
+                "representation": representation,
             },
         )
 
-    def _check_unexpected_columns(self, df: pd.DataFrame) -> CheckResult:
+    def _check_unexpected_columns(
+        self, df: pd.DataFrame, expected_columns: list[str]
+    ) -> CheckResult:
         """
         Detect columns in the DataFrame that we did not expect.
 
@@ -135,7 +178,7 @@ class SchemaCheck(BaseCheck):
         which might indicate a schema that has significantly drifted.
         """
         actual_cols = set(df.columns)
-        expected_set = set(self.expected_columns)
+        expected_set = set(expected_columns)
         unexpected = sorted(actual_cols - expected_set)
 
         if not unexpected:
@@ -164,7 +207,9 @@ class SchemaCheck(BaseCheck):
             metadata={"unexpected_columns": unexpected},
         )
 
-    def _check_dtype_mismatches(self, df: pd.DataFrame) -> CheckResult:
+    def _check_dtype_mismatches(
+        self, df: pd.DataFrame, expected_dtypes: dict[str, str]
+    ) -> CheckResult:
         """
         Verify that each column's actual dtype matches the expected dtype.
 
@@ -176,7 +221,7 @@ class SchemaCheck(BaseCheck):
         """
         mismatches: list[dict] = []
 
-        for col, expected_dtype in self.expected_dtypes.items():
+        for col, expected_dtype in expected_dtypes.items():
             if col not in df.columns:
                 continue  # Missing columns handled by _check_missing_columns
 
@@ -197,7 +242,7 @@ class SchemaCheck(BaseCheck):
                 status=CheckStatus.PASS,
                 severity=Severity.INFO,
                 message="All column data types match expectations.",
-                metadata={"checked_columns": list(self.expected_dtypes.keys())},
+                metadata={"checked_columns": list(expected_dtypes.keys())},
             )
 
         return CheckResult(

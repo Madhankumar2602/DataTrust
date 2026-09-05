@@ -31,6 +31,29 @@ def clean_df() -> pd.DataFrame:
         "Country": ["United Kingdom", "United Kingdom"],
     })
 
+
+@pytest.fixture
+def stored_df() -> pd.DataFrame:
+    """The same data as it comes back from the retail_transactions table.
+
+    Column names and dtypes match what `pd.read_sql("SELECT * FROM
+    retail_transactions")` actually returns after the ETL load.
+    """
+    return pd.DataFrame({
+        "transaction_id": [1, 2],
+        "invoice_no": ["536365", "536366"],
+        "stock_code": ["85123A", "71053"],
+        "description": ["WHITE HANGING HEART", "WHITE METAL LANTERN"],
+        "quantity": [6.0, 6.0],
+        "invoice_date": ["2010-12-01T08:26:00", "2010-12-01T08:28:00"],
+        "unit_price": [2.55, 3.39],
+        "customer_id": [17850.0, 17850.0],
+        "country": ["United Kingdom", "United Kingdom"],
+        "is_cancellation": [0, 0],
+        "revenue": [15.3, 20.34],
+        "loaded_at": ["2026-01-01T00:00:00", "2026-01-01T00:00:00"],
+    })
+
 # ── Schema Tests ─────────────────────────────────────────────────────────────
 
 
@@ -82,6 +105,119 @@ def test_schema_uses_configured_contract(clean_df):
     assert check.expected_columns == settings.EXPECTED_COLUMNS
     assert check.expected_dtypes == settings.EXPECTED_DTYPES
     assert all(result.passed for result in check.run(clean_df))
+
+
+# ── Stored (retail_transactions) representation ──────────────────────────────
+# Regression cover for a defect where the Airflow quality task validated data
+# read back from MySQL against the source column names, reported all 8 columns
+# as missing, and forced every scheduled run's health score to 0.
+
+
+def test_schema_accepts_stored_representation(stored_df):
+    """Data read back from retail_transactions must not look entirely missing."""
+    results = SchemaCheck().run(stored_df)
+
+    presence = next(r for r in results if r.check_name == "column_presence")
+    assert presence.status == CheckStatus.PASS
+    assert presence.metadata["representation"] == "stored"
+
+    unexpected = next(r for r in results if r.check_name == "unexpected_columns")
+    assert unexpected.status == CheckStatus.PASS
+
+    dtypes = next(r for r in results if r.check_name == "dtype_compatibility")
+    assert dtypes.status == CheckStatus.PASS
+
+
+def test_stored_representation_does_not_zero_the_health_score(stored_df):
+    """The end-to-end defect: a valid stored snapshot scored 0.0/Critical."""
+    from src.scoring.scorer import HealthScorer
+
+    report = QualityEngine("stored snapshot").run(stored_df)
+    score_report = HealthScorer().calculate_score(report)
+
+    assert "failure_reason" not in score_report
+    assert score_report["score"] > 0.0
+    assert score_report["status"] != "Critical"
+
+
+def test_source_representation_still_validates_source_columns(clean_df):
+    """The pre-existing source behaviour must be untouched."""
+    results = SchemaCheck().run(clean_df)
+
+    presence = next(r for r in results if r.check_name == "column_presence")
+    assert presence.status == CheckStatus.PASS
+    assert presence.metadata["representation"] == "source"
+    assert all(r.passed for r in results)
+
+
+def test_missing_stored_column_still_fails(stored_df):
+    """A genuinely absent stored column must still be reported as missing."""
+    df = stored_df.drop(columns=["unit_price"])
+
+    presence = next(
+        r for r in SchemaCheck().run(df) if r.check_name == "column_presence"
+    )
+
+    assert presence.status == CheckStatus.FAIL
+    assert "unit_price" in presence.metadata["missing_columns"]
+
+
+def test_unexpected_stored_column_still_reported(stored_df):
+    """Unexpected columns keep their existing INFO/WARNING behaviour."""
+    df = stored_df.copy()
+    df["surprise_column"] = "x"
+
+    unexpected = next(
+        r for r in SchemaCheck().run(df) if r.check_name == "unexpected_columns"
+    )
+
+    assert unexpected.status == CheckStatus.INFO
+    assert "surprise_column" in unexpected.metadata["unexpected_columns"]
+
+
+def test_stored_dtype_drift_is_still_detected(stored_df):
+    """Type drift in the stored representation must still surface."""
+    df = stored_df.copy()
+    df["unit_price"] = df["unit_price"].astype(str)
+
+    dtypes = next(
+        r for r in SchemaCheck().run(df) if r.check_name == "dtype_compatibility"
+    )
+
+    assert dtypes.status == CheckStatus.WARNING
+    assert dtypes.metadata["mismatches"][0]["column"] == "unit_price"
+
+
+def test_unrecognised_frame_falls_back_to_source_contract():
+    """An unrecognisable frame must fail loudly, not select a passing schema."""
+    df = pd.DataFrame({"foo": [1], "bar": [2]})
+
+    presence = next(
+        r for r in SchemaCheck().run(df) if r.check_name == "column_presence"
+    )
+
+    assert presence.status == CheckStatus.FAIL
+    assert presence.metadata["representation"] == "source"
+    assert presence.metadata["missing_columns"] == settings.EXPECTED_COLUMNS
+
+
+def test_explicitly_configured_columns_override_detection(stored_df):
+    """Injected expectations win; detection only applies when none are given."""
+    check = SchemaCheck(expected_columns=["invoice_no", "definitely_absent"])
+
+    presence = next(
+        r for r in check.run(stored_df) if r.check_name == "column_presence"
+    )
+
+    assert presence.metadata["representation"] == "configured"
+    assert presence.metadata["missing_columns"] == ["definitely_absent"]
+
+
+def test_stored_representation_derives_from_one_column_map():
+    """The stored contract is derived from the map the ETL loader writes with."""
+    for source_column in settings.EXPECTED_COLUMNS:
+        stored_column = settings.STORED_COLUMN_MAP[source_column]
+        assert stored_column in settings.STORED_EXPECTED_COLUMNS
 
 # ── Completeness Tests ───────────────────────────────────────────────────────
 

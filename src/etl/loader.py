@@ -9,6 +9,7 @@ import pandas as pd
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import Session
 
+from src.config import settings
 from src.database.models import RetailTransaction
 from src.logger import get_logger
 
@@ -138,20 +139,9 @@ def _build_records(dataframe: pd.DataFrame) -> list[dict]:
         ]
     ].copy()
 
-    records = records.rename(
-        columns={
-            "InvoiceNo": "invoice_no",
-            "StockCode": "stock_code",
-            "Description": "description",
-            "Quantity": "quantity",
-            "InvoiceDate": "invoice_date",
-            "UnitPrice": "unit_price",
-            "CustomerID": "customer_id",
-            "Country": "country",
-            "IsCancellation": "is_cancellation",
-            "Revenue": "revenue",
-        }
-    )
+    # Shared with the schema check, so the stored representation it validates is
+    # always the one this loader actually writes.
+    records = records.rename(columns=dict(settings.STORED_COLUMN_MAP))
 
     records["invoice_no"] = records["invoice_no"].astype(str)
     records["stock_code"] = records["stock_code"].astype(str)

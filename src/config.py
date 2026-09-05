@@ -27,6 +27,36 @@ load_dotenv()
 # .parent.parent = DataTrust/   <-- project root
 PROJECT_ROOT = Path(__file__).parent.parent
 
+# ── Source → stored column names ────────────────────────────────────────────
+# The ETL loader renames the source (CSV/pandas) columns when it writes the
+# retail_transactions table, so anything reading that table back sees the
+# stored names instead. Both the loader and the schema check read this one
+# mapping, so the two representations cannot drift apart.
+STORED_COLUMN_MAP: dict[str, str] = {
+    "InvoiceNo": "invoice_no",
+    "StockCode": "stock_code",
+    "Description": "description",
+    "Quantity": "quantity",
+    "InvoiceDate": "invoice_date",
+    "UnitPrice": "unit_price",
+    "CustomerID": "customer_id",
+    "Country": "country",
+    "IsCancellation": "is_cancellation",
+    "Revenue": "revenue",
+}
+
+# Columns the transformer derives and the loader stores alongside the source
+# columns. They are legitimate members of the stored representation.
+DERIVED_STORED_COLUMNS: list[str] = ["is_cancellation", "revenue"]
+
+# Columns the database itself owns; no source row ever carries them.
+STORED_ONLY_COLUMNS: list[str] = ["transaction_id", "loaded_at"]
+
+
+def stored_names(source_columns: list[str]) -> list[str]:
+    """Translate source column names into their stored equivalents."""
+    return [STORED_COLUMN_MAP[column] for column in source_columns if column in STORED_COLUMN_MAP]
+
 
 class Settings:
     """
@@ -74,6 +104,30 @@ class Settings:
     UNEXPECTED_COLUMN_WARNING_COUNT: int = int(
         os.getenv("UNEXPECTED_COLUMN_WARNING_COUNT", 3)
     )
+
+    # ── Stored (retail_transactions) representation ─────────────────────────
+    # Derived from the source contract above through STORED_COLUMN_MAP, so the
+    # two representations describe the same columns and cannot diverge.
+    STORED_COLUMN_MAP: dict[str, str] = STORED_COLUMN_MAP
+    STORED_EXPECTED_COLUMNS: list[str] = (
+        stored_names(EXPECTED_COLUMNS) + DERIVED_STORED_COLUMNS + STORED_ONLY_COLUMNS
+    )
+    # Only columns whose pandas dtype is stable across backends are typed here.
+    # invoice_date, is_cancellation, transaction_id and loaded_at are omitted on
+    # purpose: SQLite returns DATETIME as object where MySQL returns
+    # datetime64[ns], and boolean/integer widths differ per driver, so asserting
+    # them would raise false mismatches rather than catch real drift. Their
+    # presence is still validated, and the database enforces their real types.
+    STORED_EXPECTED_DTYPES: dict[str, str] = {
+        "invoice_no": "object",
+        "stock_code": "object",
+        "description": "object",
+        "quantity": "float64",
+        "unit_price": "float64",
+        "customer_id": "float64",
+        "country": "object",
+        "revenue": "float64",
+    }
 
     # ── Quality score thresholds ────────────────────────────────────────────
     QUALITY_THRESHOLD_CRITICAL: float = float(
