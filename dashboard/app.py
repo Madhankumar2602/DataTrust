@@ -85,6 +85,8 @@ def get_pipeline_runs() -> pd.DataFrame:
             duration_seconds,
             status,
             rows_processed,
+            rows_failed,
+            error_message,
             health_score
         FROM pipeline_runs
         ORDER BY run_id
@@ -293,6 +295,7 @@ latest_run = pipeline_runs.iloc[-1]
 latest_score = float(latest_run["health_score"])
 latest_status = str(latest_run["status"])
 rows_processed = int(latest_run["rows_processed"])
+rows_failed = int(latest_run["rows_failed"]) if pd.notna(latest_run["rows_failed"]) else 0
 
 failed_checks = quality_results[
     (quality_results["run_id"] == latest_run["run_id"])
@@ -488,6 +491,7 @@ if page == "Overview":
                     "Pipeline",
                     "Status",
                     "Rows Processed",
+                    "Rows Failed",
                     "Duration",
                     "Health Score",
                 ],
@@ -496,6 +500,7 @@ if page == "Overview":
                     str(latest_run["pipeline_name"]),
                     latest_status,
                     format_number(rows_processed),
+                    format_number(rows_failed),
                     f"{float(latest_run['duration_seconds']):.2f} sec",
                     f"{latest_score:.2f}/100",
                 ],
@@ -507,6 +512,11 @@ if page == "Overview":
             hide_index=True,
             use_container_width=True,
         )
+
+        if latest_status not in PIPELINE_SUCCESS_STATUSES and pd.notna(
+            latest_run.get("error_message")
+        ):
+            st.error(f"Last run error: {latest_run['error_message']}")
 
     with right:
 
@@ -874,6 +884,7 @@ elif page == "Pipeline History":
                 "started_at",
                 "status",
                 "rows_processed",
+                "rows_failed",
                 "duration_seconds",
                 "health_score",
             ]

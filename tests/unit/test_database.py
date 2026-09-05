@@ -78,6 +78,75 @@ def test_model_creation(repository):
     repository.session.add(run)
     repository.session.commit()
     assert run.run_id is not None
+    assert run.rows_failed == 0
+    assert run.error_message is None
+
+
+def test_create_run_starts_in_running_state(repository):
+    run = repository.create_run("test_pipeline")
+    assert run.run_id is not None
+    assert run.status == "RUNNING"
+    assert run.rows_processed == 0
+    assert run.rows_failed == 0
+    assert run.finished_at is None
+
+
+def test_complete_run_marks_success_and_computes_duration(repository):
+    started = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    run = repository.create_run("test_pipeline", started_at=started)
+
+    finished = datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc)
+    completed = repository.complete_run(
+        run.run_id, rows_processed=100, rows_failed=0, finished_at=finished
+    )
+
+    assert completed.status == "SUCCESS"
+    assert completed.rows_processed == 100
+    assert completed.rows_failed == 0
+    assert completed.duration_seconds == 5.0
+    assert completed.error_message is None
+
+
+def test_fail_run_records_error_message(repository):
+    started = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    run = repository.create_run("test_pipeline", started_at=started)
+
+    finished = datetime(2026, 1, 1, 12, 0, 2, tzinfo=timezone.utc)
+    failed = repository.fail_run(
+        run.run_id,
+        "Extraction failed: source file missing",
+        rows_processed=0,
+        rows_failed=10,
+        finished_at=finished,
+    )
+
+    assert failed.status == "FAILED"
+    assert failed.rows_failed == 10
+    assert failed.error_message == "Extraction failed: source file missing"
+    assert failed.duration_seconds == 2.0
+
+
+def test_save_failed_run_creates_traceable_record_in_one_call(repository):
+    started = datetime.now(timezone.utc)
+    failed = repository.save_failed_run(
+        pipeline_name="online_retail_etl",
+        started_at=started,
+        error_message="[LOAD] connection refused",
+        rows_processed=0,
+        rows_failed=50,
+    )
+
+    assert failed.run_id is not None
+    assert failed.status == "FAILED"
+    assert failed.error_message == "[LOAD] connection refused"
+    assert failed.rows_failed == 50
+    # The failed run must actually be retrievable, not just returned in-memory.
+    assert repository.get_latest_run().run_id == failed.run_id
+
+
+def test_fail_run_missing_run_id_raises(repository):
+    with pytest.raises(ValueError):
+        repository.fail_run(999999, "no such run")
 
 
 def test_save_and_retrieve_run_and_results(repository, quality_report):

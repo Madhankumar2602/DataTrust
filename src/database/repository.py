@@ -21,6 +21,13 @@ def _parse_timestamp(value: str | None, fallback: datetime) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Assume UTC for a naive datetime (SQLite drops tzinfo on read-back)."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
 class QualityRepository:
     """Stores Phase 2/3 output and exposes queries for later product layers."""
 
@@ -35,6 +42,8 @@ class QualityRepository:
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
         status: str = "COMPLETED",
+        rows_failed: int = 0,
+        error_message: str | None = None,
     ) -> PipelineRun:
         """Atomically save one pipeline run and all of its quality results."""
         finished = finished_at or datetime.now(timezone.utc)
@@ -47,6 +56,8 @@ class QualityRepository:
             duration_seconds=round(duration, 4),
             status=status,
             rows_processed=int(quality_report.get("total_rows", 0)),
+            rows_failed=rows_failed,
+            error_message=error_message,
             health_score=float(score_report.get("score", 0.0)),
             health_status=score_report.get("status"),
             category_scores=score_report.get("category_scores"),
@@ -74,6 +85,122 @@ class QualityRepository:
                     for result in quality_report.get("results", [])
                 ]
             )
+            self.session.commit()
+            self.session.refresh(pipeline_run)
+            return pipeline_run
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def create_run(
+        self,
+        pipeline_name: str,
+        started_at: datetime | None = None,
+        status: str = "RUNNING",
+    ) -> PipelineRun:
+        """Persist a new pipeline run immediately, before its outcome is known."""
+        pipeline_run = PipelineRun(
+            pipeline_name=pipeline_name,
+            started_at=started_at or datetime.now(timezone.utc),
+            duration_seconds=0.0,
+            status=status,
+            rows_processed=0,
+            rows_failed=0,
+            health_score=0.0,
+        )
+        try:
+            self.session.add(pipeline_run)
+            self.session.commit()
+            self.session.refresh(pipeline_run)
+            return pipeline_run
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def complete_run(
+        self,
+        run_id: int,
+        rows_processed: int = 0,
+        rows_failed: int = 0,
+        finished_at: datetime | None = None,
+        status: str = "SUCCESS",
+    ) -> PipelineRun:
+        """Mark an existing run successful/completed with its final counters."""
+        return self._finish_run(
+            run_id,
+            status=status,
+            finished_at=finished_at,
+            rows_processed=rows_processed,
+            rows_failed=rows_failed,
+        )
+
+    def fail_run(
+        self,
+        run_id: int,
+        error_message: str,
+        rows_processed: int = 0,
+        rows_failed: int = 0,
+        finished_at: datetime | None = None,
+        status: str = "FAILED",
+    ) -> PipelineRun:
+        """Mark an existing run failed and persist a useful error message."""
+        return self._finish_run(
+            run_id,
+            status=status,
+            finished_at=finished_at,
+            rows_processed=rows_processed,
+            rows_failed=rows_failed,
+            error_message=error_message,
+        )
+
+    def save_failed_run(
+        self,
+        pipeline_name: str,
+        started_at: datetime,
+        error_message: str,
+        finished_at: datetime | None = None,
+        rows_processed: int = 0,
+        rows_failed: int = 0,
+        status: str = "FAILED",
+    ) -> PipelineRun:
+        """Create and immediately mark failed a run that never reached completion.
+
+        Used when a pipeline fails before any run row exists yet (e.g. it failed
+        before calling `create_run`), so the failure is still traceable.
+        """
+        pipeline_run = self.create_run(pipeline_name, started_at, status="RUNNING")
+        return self.fail_run(
+            pipeline_run.run_id,
+            error_message,
+            rows_processed=rows_processed,
+            rows_failed=rows_failed,
+            finished_at=finished_at,
+            status=status,
+        )
+
+    def _finish_run(
+        self,
+        run_id: int,
+        status: str,
+        finished_at: datetime | None,
+        rows_processed: int,
+        rows_failed: int,
+        error_message: str | None = None,
+    ) -> PipelineRun:
+        pipeline_run = self.session.get(PipelineRun, run_id)
+        if pipeline_run is None:
+            raise ValueError(f"Pipeline run #{run_id} not found.")
+        finished = _as_utc(finished_at or datetime.now(timezone.utc))
+        pipeline_run.finished_at = finished
+        pipeline_run.duration_seconds = round(
+            max((finished - _as_utc(pipeline_run.started_at)).total_seconds(), 0.0), 4
+        )
+        pipeline_run.status = status
+        pipeline_run.rows_processed = rows_processed
+        pipeline_run.rows_failed = rows_failed
+        if error_message is not None:
+            pipeline_run.error_message = error_message
+        try:
             self.session.commit()
             self.session.refresh(pipeline_run)
             return pipeline_run

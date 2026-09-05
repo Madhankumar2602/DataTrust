@@ -65,6 +65,10 @@ class PipelineRunItem(BaseModel):
     duration_seconds: float | None = None
     status: str = Field(..., description="Pipeline execution result, e.g. SUCCESS")
     rows_processed: int | None = None
+    rows_failed: int | None = Field(default=0, description="Rows that failed to process")
+    error_message: str | None = Field(
+        default=None, description="Failure reason, populated only when the run failed"
+    )
     health_score: float | None = None
     health_status: str | None = Field(default=None, description="Health tier for this run")
 

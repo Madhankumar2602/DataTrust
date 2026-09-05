@@ -120,6 +120,8 @@ def list_pipeline_runs(
             duration_seconds=r.duration_seconds,
             status=r.status,
             rows_processed=r.rows_processed,
+            rows_failed=r.rows_failed,
+            error_message=r.error_message,
             health_score=r.health_score,
             health_status=r.health_status,
         )

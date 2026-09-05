@@ -36,6 +36,9 @@ class PipelineRun(Base):
         CheckConstraint("duration_seconds >= 0", name="ck_pipeline_runs_duration_non_negative"),
         CheckConstraint("rows_processed >= 0", name="ck_pipeline_runs_rows_non_negative"),
         CheckConstraint(
+            "rows_failed >= 0", name="ck_pipeline_runs_rows_failed_non_negative"
+        ),
+        CheckConstraint(
             "health_score >= 0 AND health_score <= 100",
             name="ck_pipeline_runs_score_range",
         ),
@@ -49,6 +52,9 @@ class PipelineRun(Base):
     duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     rows_processed: Mapped[int] = mapped_column(Integer, nullable=False)
+    rows_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Populated only when a run fails; None on a normal successful run.
+    error_message: Mapped[str | None] = mapped_column(Text)
     health_score: Mapped[float] = mapped_column(Float, nullable=False)
     # Health tier produced by HealthScorer ("Healthy"/"Warning"/"Poor"/"Critical").
     # Distinct from `status` above, which is the pipeline EXECUTION result.

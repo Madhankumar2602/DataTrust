@@ -80,21 +80,76 @@ def test_pipeline_succeeds_despite_quality_failure(csv_path, retail_df):
     assert result.quality_failures == 1
 
 
+def test_pipeline_success_records_zero_rows_failed_and_duration(csv_path, tmp_path):
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'run.db'}"
+    result = run_etl_pipeline(csv_path, db_url)
+    assert result.status == "SUCCESS"
+    assert result.rows_failed == 0
+    assert result.duration_seconds >= 0.0
+    assert result.run_id is not None
+
+    # The metadata must actually be persisted, not just returned in-memory.
+    engine = create_database_engine(db_url)
+    session = create_session_factory(engine)()
+    stored = repo_get_run(session, result.run_id)
+    session.close()
+    assert stored is not None
+    assert stored.status == "SUCCESS"
+    assert stored.rows_failed == 0
+    assert stored.rows_processed == 2
+    assert stored.error_message is None
+
+
 def test_pipeline_stops_on_extraction_failure(tmp_path):
-    result = run_etl_pipeline(tmp_path / "absent.csv", "sqlite+pysqlite:///:memory:")
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'run.db'}"
+    result = run_etl_pipeline(tmp_path / "absent.csv", db_url)
     assert result.status == "FAILED"
     assert result.error_stage == "EXTRACT"
+    assert result.rows_failed == 0
+    assert result.error_message
+
+    # A FAILED run must be traceable in the database, not silently dropped.
+    engine = create_database_engine(db_url)
+    session = create_session_factory(engine)()
+    stored = repo_get_run(session, result.run_id)
+    session.close()
+    assert stored is not None
+    assert stored.status == "FAILED"
+    assert stored.error_message
+    assert "EXTRACT" in stored.error_message
 
 
-def test_pipeline_stops_on_transformation_failure(csv_path, retail_df):
+def test_pipeline_stops_on_transformation_failure(csv_path, retail_df, tmp_path):
     retail_df.loc[0, "InvoiceDate"] = "bad-date"
     retail_df.to_csv(csv_path, index=False)
-    result = run_etl_pipeline(csv_path, "sqlite+pysqlite:///:memory:")
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'run.db'}"
+    result = run_etl_pipeline(csv_path, db_url)
     assert result.status == "FAILED"
     assert result.error_stage == "TRANSFORM"
+    # Both rows were extracted but neither made it through the pipeline.
+    assert result.rows_failed == 2
+
+    engine = create_database_engine(db_url)
+    session = create_session_factory(engine)()
+    stored = repo_get_run(session, result.run_id)
+    session.close()
+    assert stored.rows_failed == 2
+    assert stored.status == "FAILED"
 
 
 def test_pipeline_surfaces_load_failure(csv_path):
     result = run_etl_pipeline(csv_path, "not-a-database-url")
     assert result.status == "FAILED"
     assert result.error_stage == "LOAD"
+    # Both rows were extracted/transformed but the load never happened.
+    assert result.rows_failed == 2
+    # The failing URL is unusable for tracking too, so persistence is skipped
+    # rather than raising a second exception over the original failure.
+    assert result.run_id is None
+
+
+def repo_get_run(session, run_id):
+    """Small local helper: fetch a PipelineRun without pulling in the full repository fixture."""
+    from src.database.models import PipelineRun
+
+    return session.get(PipelineRun, run_id)

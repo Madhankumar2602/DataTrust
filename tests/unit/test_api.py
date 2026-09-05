@@ -204,6 +204,28 @@ def test_pipeline_runs_list(client, test_db_session):
     assert data["total_runs"] == 1
     assert len(data["runs"]) == 1
     assert data["runs"][0]["pipeline_name"] == "daily_etl"
+    # New metadata fields must be present and default sanely for older-style rows.
+    assert data["runs"][0]["rows_failed"] == 0
+    assert data["runs"][0]["error_message"] is None
+
+
+def test_pipeline_runs_list_exposes_failure_metadata(client, test_db_session):
+    """A FAILED run's rows_failed and error_message must reach the API."""
+    _seed_run(
+        test_db_session,
+        pipeline_name="daily_etl",
+        status="FAILED",
+        rows_processed=0,
+        rows_failed=25,
+        error_message="[LOAD] connection refused",
+    )
+
+    response = client.get("/api/v1/pipeline-runs?limit=10")
+    assert response.status_code == 200
+    run_item = response.json()["runs"][0]
+    assert run_item["status"] == "FAILED"
+    assert run_item["rows_failed"] == 25
+    assert run_item["error_message"] == "[LOAD] connection refused"
 
 
 def test_quality_results_for_run_success(client, test_db_session):

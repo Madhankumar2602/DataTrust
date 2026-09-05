@@ -36,6 +36,7 @@ class ETLPipelineResult:
     run_id: int | None = None
     error_stage: str | None = None
     error_message: str | None = None
+    rows_failed: int = 0
 
 
 def run_etl_pipeline(
@@ -97,12 +98,69 @@ def run_etl_pipeline(
         )
     except Exception as exc:
         finished_at = datetime.now(timezone.utc)
+        duration = round(perf_counter() - timer, 4)
+        error_message = str(exc)
         logger.exception("[%s] ETL pipeline failed: %s", stage, exc)
+
+        # Rows that were read but never made it through the (all-or-nothing) load
+        # stage count as failed; rows never even extracted are not "failed", just
+        # unattempted.
+        rows_failed = 0 if counts["loaded"] else counts["extracted"]
+
+        failed_run_id = _persist_failed_run(
+            pipeline_name=pipeline_name,
+            started_at=started_at,
+            finished_at=finished_at,
+            error_message=f"[{stage}] {error_message}",
+            rows_processed=counts["loaded"],
+            rows_failed=rows_failed,
+            database_url=database_url,
+        )
+
         return ETLPipelineResult(
-            pipeline_name, "FAILED", started_at, finished_at, round(perf_counter() - timer, 4),
+            pipeline_name, "FAILED", started_at, finished_at, duration,
             counts["extracted"],
             counts["transformed"],
             counts["loaded"],
+            run_id=failed_run_id,
             error_stage=stage,
-            error_message=str(exc),
+            error_message=error_message,
+            rows_failed=rows_failed,
         )
+
+
+def _persist_failed_run(
+    pipeline_name: str,
+    started_at: datetime,
+    finished_at: datetime,
+    error_message: str,
+    rows_processed: int,
+    rows_failed: int,
+    database_url: str | None,
+) -> int | None:
+    """Best-effort persistence of a FAILED run record so failures stay traceable.
+
+    Runs in its own engine/session, separate from whatever connection (if any)
+    the failed pipeline stage was using. If the database itself is unreachable
+    (e.g. the failure *was* a bad connection string), this logs and gives up
+    rather than raising a second exception over the original failure.
+    """
+    try:
+        engine = create_database_engine(database_url)
+        Base.metadata.create_all(engine)
+        session_factory = create_session_factory(engine)
+        with session_factory() as session:
+            failed_run = QualityRepository(session).save_failed_run(
+                pipeline_name=pipeline_name,
+                started_at=started_at,
+                error_message=error_message,
+                finished_at=finished_at,
+                rows_processed=rows_processed,
+                rows_failed=rows_failed,
+            )
+            return failed_run.run_id
+    except Exception as persist_exc:
+        logger.warning(
+            "Could not persist FAILED pipeline run record: %s", persist_exc
+        )
+        return None
