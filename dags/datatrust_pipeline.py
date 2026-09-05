@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,10 +29,78 @@ from src.database.connection import create_database_engine, create_session_facto
 from src.database.models import Base
 from src.database.repository import QualityRepository
 from src.etl.pipeline import run_etl_pipeline
+from src.pipeline.run_lifecycle import (
+    DEFAULT_PIPELINE_NAME,
+    complete_pipeline_run,
+    fail_pipeline_run,
+    record_pipeline_run_results,
+    start_pipeline_run,
+)
 from src.quality.engine import QualityEngine
 from src.scoring.scorer import HealthScorer
 
 logger = logging.getLogger("datatrust.pipeline")
+
+# One logical DAG execution owns exactly one pipeline_runs row. The id is opened
+# by START_TASK_ID and read back from XCom by the stages that update it — a bare
+# integer, never a dataset.
+START_TASK_ID = "start_pipeline_run"
+
+
+def _current_run_id(context: dict[str, Any]) -> int | None:
+    """Read this DAG execution's run_id from the opening task's XCom."""
+    ti = context.get("ti") or context.get("task_instance")
+    if ti is None:
+        return None
+    return ti.xcom_pull(task_ids=START_TASK_ID)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle trigger points
+# ---------------------------------------------------------------------------
+
+def open_pipeline_run(**context: Any) -> int:
+    """Open the RUNNING pipeline_runs row before any processing starts."""
+    run_id = start_pipeline_run(pipeline_name=DEFAULT_PIPELINE_NAME)
+    logger.info("[ORCHESTRATION] Pipeline run #%s opened for this DAG execution", run_id)
+    return run_id
+
+
+def close_pipeline_run(**context: Any) -> dict[str, Any]:
+    """Mark the run COMPLETED once every processing stage has succeeded."""
+    run_id = _current_run_id(context)
+    if run_id is None:
+        raise ValueError("No pipeline run_id found in XCom; cannot complete the run.")
+
+    ti = context.get("ti") or context.get("task_instance")
+    etl_summary = ti.xcom_pull(task_ids="extract_transform_load") or {}
+
+    complete_pipeline_run(
+        run_id,
+        rows_processed=int(etl_summary.get("rows_loaded", 0)),
+        rows_failed=int(etl_summary.get("rows_failed", 0)),
+    )
+    logger.info("[ORCHESTRATION] Pipeline run #%s COMPLETED", run_id)
+    return {"run_id": run_id, "status": "COMPLETED"}
+
+
+def handle_task_failure(context: dict[str, Any]) -> None:
+    """Mark this execution's run FAILED once a task has exhausted its retries.
+
+    Airflow calls `on_failure_callback` only when a task instance reaches its
+    final FAILED state, so intermediate retryable attempts never reach here and
+    a run cannot flap FAILED -> SUCCESS across attempts.
+    """
+    run_id = _current_run_id(context)
+    if run_id is None:
+        # The opening task itself failed, so there is no run to update.
+        logger.warning("[ORCHESTRATION] Task failed before a pipeline run was opened")
+        return
+
+    ti = context.get("ti") or context.get("task_instance")
+    task_id = getattr(ti, "task_id", "unknown_task")
+    exception = context.get("exception")
+    fail_pipeline_run(run_id, error_message=f"[{task_id}] {exception}")
 
 
 # ---------------------------------------------------------------------------
@@ -53,9 +121,12 @@ def run_extract_transform_load(**context: Any) -> dict[str, Any]:
     logger.info("[ORCHESTRATION] Stage 1/4: Starting Extract, Transform, Load (ETL)...")
 
     result = run_etl_pipeline(
-        pipeline_name="datatrust_daily_pipeline",
+        pipeline_name=DEFAULT_PIPELINE_NAME,
         load_only=True,
         raise_on_failure=True,
+        # This DAG execution already owns a pipeline_runs row; the failure
+        # callback updates it, so the pipeline must not record a second one.
+        track_run=False,
     )
 
     summary = {
@@ -63,6 +134,7 @@ def run_extract_transform_load(**context: Any) -> dict[str, Any]:
         "rows_extracted": result.rows_extracted,
         "rows_transformed": result.rows_transformed,
         "rows_loaded": result.rows_loaded,
+        "rows_failed": result.rows_failed,
         "duration_seconds": result.duration_seconds,
     }
     logger.info("[ORCHESTRATION] Stage 1/4 Complete: %s", summary)
@@ -119,8 +191,12 @@ def run_quality_validation(**context: Any) -> dict[str, Any]:
 
 def run_health_scoring_and_persistence(**context: Any) -> dict[str, Any]:
     """
-    Calculate the 0–100 Data Health Score from the validation report
-    and atomically persist the pipeline run and individual results to MySQL.
+    Calculate the 0–100 Data Health Score from the validation report and record
+    it, with the individual quality results, against this execution's run.
+
+    The run row already exists (opened by `start_pipeline_run`), so this stage
+    updates it rather than inserting a second one. It stays RUNNING until the
+    final stage completes it.
     """
     # Retrieve quality report from previous task XCom if available, or generate fresh
     ti = context.get("ti")
@@ -143,27 +219,15 @@ def run_health_scoring_and_persistence(**context: Any) -> dict[str, Any]:
     scorer = HealthScorer()
     score_report = scorer.calculate_score(quality_report)
 
-    # Persist to MySQL pipeline_runs and quality_results
-    engine = create_database_engine()
-    Base.metadata.create_all(engine)
-    session_factory = create_session_factory(engine)
+    run_id = _current_run_id(context)
+    if run_id is None:
+        raise ValueError("No pipeline run_id found in XCom; cannot record scoring results.")
 
-    started_at = datetime.now(timezone.utc)
-    with session_factory() as session:
-        repo = QualityRepository(session)
-        pipeline_run = repo.save_run(
-            quality_report=quality_report,
-            score_report=score_report,
-            pipeline_name="datatrust_daily_pipeline",
-            started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
-            status="SUCCESS",
-        )
-        run_id = pipeline_run.run_id
-        health_score = pipeline_run.health_score
+    record_pipeline_run_results(run_id, quality_report, score_report)
+    health_score = float(score_report.get("score", 0.0))
 
     logger.info(
-        "[SCORING] Pipeline Run #%s saved. Health Score: %.2f/100 (Status: %s)",
+        "[SCORING] Pipeline Run #%s scored. Health Score: %.2f/100 (Status: %s)",
         run_id,
         health_score,
         score_report.get("status", "UNKNOWN"),
@@ -261,6 +325,9 @@ DEFAULT_ARGS = {
     "email_on_retry": False,
     "retries": 2,
     "retry_delay": timedelta(minutes=5),
+    # Fires only when a task instance has exhausted its retries, so a run is
+    # never marked FAILED because of an attempt that later succeeded.
+    "on_failure_callback": handle_task_failure,
 }
 
 try:
@@ -278,6 +345,15 @@ try:
         catchup=False,
         tags=["datatrust", "quality", "observability", "etl", "anomaly"],
     ) as dag:
+
+        task_start = PythonOperator(
+            task_id=START_TASK_ID,
+            python_callable=open_pipeline_run,
+            doc_md=(
+                "Opens the RUNNING pipeline_runs row for this DAG execution and "
+                "publishes its run_id to XCom."
+            ),
+        )
 
         task_etl = PythonOperator(
             task_id="extract_transform_load",
@@ -312,8 +388,26 @@ try:
             ),
         )
 
-        # Strictly ordered pipeline dependency chain
-        task_etl >> task_quality >> task_scoring >> task_anomaly
+        task_complete = PythonOperator(
+            task_id="complete_pipeline_run",
+            python_callable=close_pipeline_run,
+            doc_md=(
+                "Marks this execution's pipeline_runs row COMPLETED once every "
+                "processing stage has succeeded."
+            ),
+        )
+
+        # Strictly ordered pipeline dependency chain, bookended by the run
+        # lifecycle: one pipeline_runs row is opened before any processing and
+        # closed only after the last stage succeeds.
+        (
+            task_start
+            >> task_etl
+            >> task_quality
+            >> task_scoring
+            >> task_anomaly
+            >> task_complete
+        )
 
 except ImportError:
     # Airflow is not installed in the current environment (e.g. native Windows dev environment)

@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from src.database.models import AnomalyResult, PipelineRun, QualityResult
+from src.database.models import (
+    RUN_STATUS_RUNNING,
+    AnomalyResult,
+    PipelineRun,
+    QualityResult,
+)
 
 if TYPE_CHECKING:
     from src.anomaly.detector import AnomalyDetectionResult
@@ -26,6 +31,13 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value
+
+
+def _apply_score_report(pipeline_run: PipelineRun, score_report: dict[str, Any]) -> None:
+    """Copy HealthScorer output onto a run, exactly as `save_run` stores it."""
+    pipeline_run.health_score = float(score_report.get("score", 0.0))
+    pipeline_run.health_status = score_report.get("status")
+    pipeline_run.category_scores = score_report.get("category_scores")
 
 
 class QualityRepository:
@@ -65,26 +77,7 @@ class QualityRepository:
         try:
             self.session.add(pipeline_run)
             self.session.flush()
-            self.session.add_all(
-                [
-                    QualityResult(
-                        run_id=pipeline_run.run_id,
-                        check_name=result.get("check_name", "unknown"),
-                        category=result.get("category", "unknown"),
-                        status=result.get("status", "UNKNOWN"),
-                        severity=result.get("severity", "INFO"),
-                        affected_rows=int(result.get("affected_rows", 0)),
-                        affected_percentage=float(
-                            result.get(
-                                "affected_percentage",
-                                result.get("affected_pct", 0.0),
-                            )
-                        ),
-                        message=result.get("message", ""),
-                    )
-                    for result in quality_report.get("results", [])
-                ]
-            )
+            self.session.add_all(self._quality_result_rows(pipeline_run.run_id, quality_report))
             self.session.commit()
             self.session.refresh(pipeline_run)
             return pipeline_run
@@ -117,6 +110,28 @@ class QualityRepository:
             self.session.rollback()
             raise
 
+    def record_run_results(
+        self,
+        run_id: int,
+        quality_report: dict[str, Any],
+        score_report: dict[str, Any],
+    ) -> PipelineRun:
+        """Attach quality results and health scores to a run that is still open.
+
+        Used by orchestration, where scoring happens in its own stage but the run
+        is only finished once every later stage has succeeded.
+        """
+        pipeline_run = self._require_run(run_id)
+        _apply_score_report(pipeline_run, score_report)
+        try:
+            self.session.add_all(self._quality_result_rows(run_id, quality_report))
+            self.session.commit()
+            self.session.refresh(pipeline_run)
+            return pipeline_run
+        except Exception:
+            self.session.rollback()
+            raise
+
     def complete_run(
         self,
         run_id: int,
@@ -124,14 +139,23 @@ class QualityRepository:
         rows_failed: int = 0,
         finished_at: datetime | None = None,
         status: str = "SUCCESS",
+        score_report: dict[str, Any] | None = None,
+        quality_report: dict[str, Any] | None = None,
     ) -> PipelineRun:
-        """Mark an existing run successful/completed with its final counters."""
+        """Mark an existing run successful/completed with its final counters.
+
+        `score_report` and `quality_report` are optional: pass them when one call
+        should both finish the run and store its health/quality output, or leave
+        them out when `record_run_results` already stored that output.
+        """
         return self._finish_run(
             run_id,
             status=status,
             finished_at=finished_at,
             rows_processed=rows_processed,
             rows_failed=rows_failed,
+            score_report=score_report,
+            quality_report=quality_report,
         )
 
     def fail_run(
@@ -178,6 +202,35 @@ class QualityRepository:
             status=status,
         )
 
+    def _require_run(self, run_id: int) -> PipelineRun:
+        pipeline_run = self.session.get(PipelineRun, run_id)
+        if pipeline_run is None:
+            raise ValueError(f"Pipeline run #{run_id} not found.")
+        return pipeline_run
+
+    def _quality_result_rows(
+        self, run_id: int, quality_report: dict[str, Any]
+    ) -> list[QualityResult]:
+        """Build the QualityResult rows for one run from a validation report."""
+        return [
+            QualityResult(
+                run_id=run_id,
+                check_name=result.get("check_name", "unknown"),
+                category=result.get("category", "unknown"),
+                status=result.get("status", "UNKNOWN"),
+                severity=result.get("severity", "INFO"),
+                affected_rows=int(result.get("affected_rows", 0)),
+                affected_percentage=float(
+                    result.get(
+                        "affected_percentage",
+                        result.get("affected_pct", 0.0),
+                    )
+                ),
+                message=result.get("message", ""),
+            )
+            for result in quality_report.get("results", [])
+        ]
+
     def _finish_run(
         self,
         run_id: int,
@@ -186,10 +239,10 @@ class QualityRepository:
         rows_processed: int,
         rows_failed: int,
         error_message: str | None = None,
+        score_report: dict[str, Any] | None = None,
+        quality_report: dict[str, Any] | None = None,
     ) -> PipelineRun:
-        pipeline_run = self.session.get(PipelineRun, run_id)
-        if pipeline_run is None:
-            raise ValueError(f"Pipeline run #{run_id} not found.")
+        pipeline_run = self._require_run(run_id)
         finished = _as_utc(finished_at or datetime.now(timezone.utc))
         pipeline_run.finished_at = finished
         pipeline_run.duration_seconds = round(
@@ -200,6 +253,10 @@ class QualityRepository:
         pipeline_run.rows_failed = rows_failed
         if error_message is not None:
             pipeline_run.error_message = error_message
+        if score_report is not None:
+            _apply_score_report(pipeline_run, score_report)
+        if quality_report is not None:
+            self.session.add_all(self._quality_result_rows(run_id, quality_report))
         try:
             self.session.commit()
             self.session.refresh(pipeline_run)
@@ -211,6 +268,22 @@ class QualityRepository:
     def get_latest_run(self) -> PipelineRun | None:
         """Return the most recently stored run with its quality results."""
         return self.session.scalar(self._runs_query().order_by(PipelineRun.run_id.desc()).limit(1))
+
+    def get_latest_finished_run(self) -> PipelineRun | None:
+        """Return the newest run that has reached a terminal state.
+
+        A RUNNING run has no health score yet, so health figures must come from
+        the last run that actually finished rather than from an in-flight one.
+        Deliberately not named "completed": a FAILED run has finished too, and
+        hiding it would misreport a broken pipeline as merely stale.
+        """
+        statement = (
+            self._runs_query()
+            .where(PipelineRun.status != RUN_STATUS_RUNNING)
+            .order_by(PipelineRun.run_id.desc())
+            .limit(1)
+        )
+        return self.session.scalar(statement)
 
     def get_run(self, run_id: int) -> PipelineRun | None:
         """Return one stored pipeline run by ID with its quality results."""

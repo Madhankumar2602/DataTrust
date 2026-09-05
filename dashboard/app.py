@@ -211,6 +211,11 @@ def get_anomalies() -> pd.DataFrame:
 # make a run "failed".
 PIPELINE_SUCCESS_STATUSES = {"SUCCESS", "COMPLETED"}
 
+# A run that has started but not finished. It has no health score yet, so it must
+# never drive the health metrics - otherwise an in-flight run would be displayed
+# as a real score of 0.00/100.
+PIPELINE_RUNNING_STATUS = "RUNNING"
+
 
 def health_label(score: float) -> str:
     if score >= 90:
@@ -290,7 +295,22 @@ if pipeline_runs.empty:
     st.stop()
 
 
-latest_run = pipeline_runs.iloc[-1]
+# The newest row carries the current execution state (it may still be RUNNING),
+# while every health figure below is read from the newest row that finished.
+newest_run = pipeline_runs.iloc[-1]
+newest_status = str(newest_run["status"])
+active_run = newest_run if newest_status == PIPELINE_RUNNING_STATUS else None
+
+finished_runs = pipeline_runs[pipeline_runs["status"] != PIPELINE_RUNNING_STATUS]
+
+if finished_runs.empty:
+    st.info(
+        f"Pipeline run #{newest_run['run_id']} is currently running. "
+        "No completed run has been stored yet."
+    )
+    st.stop()
+
+latest_run = finished_runs.iloc[-1]
 
 latest_score = float(latest_run["health_score"])
 latest_status = str(latest_run["status"])
@@ -321,10 +341,8 @@ if page == "Overview":
     # Run comparison
     # -----------------------------------------------------------------------
 
-    latest_run = pipeline_runs.iloc[-1]
-
-    if len(pipeline_runs) >= 2:
-        previous_run = pipeline_runs.iloc[-2]
+    if len(finished_runs) >= 2:
+        previous_run = finished_runs.iloc[-2]
         score_delta = latest_score - float(previous_run["health_score"])
     else:
         previous_run = None
@@ -337,7 +355,9 @@ if page == "Overview":
     status_col, score_col = st.columns([1, 3])
 
     with status_col:
-        if latest_status in PIPELINE_SUCCESS_STATUSES:
+        if active_run is not None:
+            st.info(f"● PIPELINE RUNNING (#{active_run['run_id']})")
+        elif latest_status in PIPELINE_SUCCESS_STATUSES:
             st.success(f"● PIPELINE {latest_status}")
         elif latest_status == "WARNING":
             st.warning("● PIPELINE WARNING")
@@ -435,7 +455,7 @@ if page == "Overview":
     st.divider()
     st.subheader("📈 Data Health Trend")
 
-    trend = pipeline_runs.copy()
+    trend = finished_runs.copy()
     trend["started_at"] = pd.to_datetime(trend["started_at"])
 
     fig = px.line(
@@ -894,6 +914,10 @@ elif page == "Pipeline History":
     )
 
     st.divider()
+
+    # Charts read finished runs only: an in-flight run has no score, duration or
+    # row count yet and would otherwise be plotted as a genuine zero.
+    history = history[history["status"] != PIPELINE_RUNNING_STATUS]
 
     # Health score trend
     st.subheader("📈 Historical Health Score")

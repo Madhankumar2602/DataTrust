@@ -149,6 +149,106 @@ def test_fail_run_missing_run_id_raises(repository):
         repository.fail_run(999999, "no such run")
 
 
+def test_record_run_results_keeps_run_open_and_stores_health(repository, quality_report):
+    """Scoring output attaches to the open run without finishing it."""
+    run = repository.create_run("datatrust_daily_pipeline")
+    score_report = {
+        "score": 72.5,
+        "status": "Poor",
+        "category_scores": {"schema": {"score": 20.0, "max_score": 20.0}},
+    }
+
+    recorded = repository.record_run_results(run.run_id, quality_report, score_report)
+
+    assert recorded.run_id == run.run_id
+    assert recorded.status == "RUNNING"
+    assert recorded.finished_at is None
+    assert recorded.health_score == 72.5
+    assert recorded.health_status == "Poor"
+    assert recorded.category_scores == {"schema": {"score": 20.0, "max_score": 20.0}}
+    # Quality results must still be persisted, exactly as save_run does it.
+    assert len(repository.get_quality_results(run.run_id)) == 3
+
+
+def test_complete_run_after_record_results_retains_health_and_quality(repository, quality_report):
+    """Completing an already-scored run must not discard its health or results."""
+    run = repository.create_run("datatrust_daily_pipeline")
+    repository.record_run_results(
+        run.run_id, quality_report, {"score": 88.0, "status": "Good"}
+    )
+
+    completed = repository.complete_run(
+        run.run_id, rows_processed=3, rows_failed=0, status="COMPLETED"
+    )
+
+    assert completed.status == "COMPLETED"
+    assert completed.rows_processed == 3
+    assert completed.health_score == 88.0
+    assert completed.health_status == "Good"
+    assert len(repository.get_quality_results(run.run_id)) == 3
+
+
+def test_complete_run_can_store_health_and_quality_in_one_call(repository, quality_report):
+    """A single-shot completion stores the same fields as the two-step path."""
+    run = repository.create_run("datatrust_daily_pipeline")
+
+    completed = repository.complete_run(
+        run.run_id,
+        rows_processed=3,
+        status="COMPLETED",
+        score_report={"score": 61.5, "status": "Poor"},
+        quality_report=quality_report,
+    )
+
+    assert completed.status == "COMPLETED"
+    assert completed.health_score == 61.5
+    assert completed.health_status == "Poor"
+    assert len(repository.get_quality_results(run.run_id)) == 3
+
+
+def test_get_latest_finished_run_ignores_running_rows(repository, quality_report):
+    """An in-flight run must never be served as the latest health result."""
+    finished = repository.save_run(quality_report, {"score": 91.0}, status="COMPLETED")
+    active = repository.create_run("datatrust_daily_pipeline")
+
+    # The newest row is the active one, but health must come from the finished run.
+    assert repository.get_latest_run().run_id == active.run_id
+    assert repository.get_latest_finished_run().run_id == finished.run_id
+    assert repository.get_latest_finished_run().health_score == 91.0
+
+
+def test_get_latest_finished_run_still_surfaces_failures(repository):
+    """A FAILED run has finished; hiding it would misreport a broken pipeline."""
+    failed = repository.save_failed_run(
+        pipeline_name="datatrust_daily_pipeline",
+        started_at=datetime.now(timezone.utc),
+        error_message="[quality_validation] boom",
+    )
+    repository.create_run("datatrust_daily_pipeline")
+
+    assert repository.get_latest_finished_run().run_id == failed.run_id
+    assert repository.get_latest_finished_run().status == "FAILED"
+
+
+def test_get_latest_finished_run_returns_none_when_only_running(repository):
+    repository.create_run("datatrust_daily_pipeline")
+    assert repository.get_latest_finished_run() is None
+
+
+def test_save_run_remains_the_standalone_path(repository, quality_report):
+    """run_database.py still creates a complete run in one call, unchanged."""
+    run = repository.save_run(quality_report, {"score": 72.5, "status": "Poor"})
+
+    assert run.status == "COMPLETED"
+    assert run.rows_processed == 3
+    assert run.health_score == 72.5
+    assert run.health_status == "Poor"
+    assert run.finished_at is not None
+    assert len(repository.get_quality_results(run.run_id)) == 3
+    # A standalone run is finished the moment it is stored.
+    assert repository.get_latest_finished_run().run_id == run.run_id
+
+
 def test_save_and_retrieve_run_and_results(repository, quality_report):
     run = repository.save_run(quality_report, {"score": 72.5})
     assert run.health_score == 72.5

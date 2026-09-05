@@ -65,7 +65,9 @@ def get_latest_health_score(
     repo: QualityRepository = Depends(get_repository),
 ) -> HealthScoreResponse:
     """Retrieve the most recent computed Data Health Score and validation breakdown."""
-    latest_run = repo.get_latest_run()
+    # A RUNNING run has no score yet, so the health figures come from the last
+    # run that actually finished rather than from an in-flight one.
+    latest_run = repo.get_latest_finished_run()
     if not latest_run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -231,7 +233,11 @@ def get_summary(
     repo: QualityRepository = Depends(get_repository),
 ) -> SummaryResponse:
     """Retrieve an executive summary of current data pipeline health, validation, and anomalies."""
+    # Execution state comes from the newest run so an active or failed run stays
+    # visible; health figures come from the last run that finished, because a
+    # RUNNING run has not computed a score yet.
     latest_run = repo.get_latest_run()
+    latest_finished = repo.get_latest_finished_run()
     # Real stored total, not the size of a capped page.
     anomaly_total = repo.count_anomalies()
 
@@ -249,18 +255,20 @@ def get_summary(
             last_run_timestamp=None,
         )
 
-    results = latest_run.quality_results
+    results = latest_finished.quality_results if latest_finished else []
     failures = sum(1 for r in results if r.status == "FAIL")
     warnings = sum(1 for r in results if r.status == "WARNING")
 
     return SummaryResponse(
         status="OPERATIONAL",
         latest_run_id=latest_run.run_id,
-        latest_health_score=float(latest_run.health_score or 0.0),
+        latest_health_score=(
+            float(latest_finished.health_score or 0.0) if latest_finished else None
+        ),
         # Health tier, NOT the execution status - these are different concepts.
-        health_status=latest_run.health_status,
+        health_status=latest_finished.health_status if latest_finished else None,
         pipeline_status=latest_run.status,
-        total_rows_processed=latest_run.rows_processed,
+        total_rows_processed=latest_finished.rows_processed if latest_finished else 0,
         quality_failures=failures,
         quality_warnings=warnings,
         anomaly_count=anomaly_total,

@@ -451,6 +451,73 @@ def test_database_failure_does_not_leak_internals(broken_db_client):
         assert leak not in detail
 
 
+def test_health_score_ignores_a_running_run(client, test_db_session):
+    """An in-flight run must not be served as a real health score of 0.00."""
+    _seed_run(test_db_session, status="COMPLETED", health_score=88.5, health_status="Good")
+    _seed_run(test_db_session, status="RUNNING", health_score=0.0, rows_processed=0)
+
+    data = client.get("/api/v1/health-score").json()
+
+    assert data["health_score"] == 88.5
+    assert data["health_status"] == "Good"
+    assert data["pipeline_status"] == "COMPLETED"
+
+
+def test_summary_shows_running_status_but_last_finished_health(client, test_db_session):
+    """An active run stays visible without wiping the last real health figures."""
+    _seed_run(
+        test_db_session,
+        status="COMPLETED",
+        health_score=88.5,
+        health_status="Good",
+        rows_processed=1000,
+    )
+    _seed_run(test_db_session, status="RUNNING", health_score=0.0, rows_processed=0)
+
+    data = client.get("/api/v1/summary").json()
+
+    # Execution state is truthful about the active run...
+    assert data["pipeline_status"] == "RUNNING"
+    # ...while health still reflects the last run that actually finished.
+    assert data["latest_health_score"] == 88.5
+    assert data["health_status"] == "Good"
+    assert data["total_rows_processed"] == 1000
+
+
+def test_summary_does_not_hide_a_failed_run(client, test_db_session):
+    """A FAILED newest run must surface, not be masked by an older success."""
+    _seed_run(test_db_session, status="COMPLETED", health_score=88.5)
+    _seed_run(
+        test_db_session,
+        status="FAILED",
+        health_score=0.0,
+        error_message="[quality_validation] boom",
+    )
+
+    data = client.get("/api/v1/summary").json()
+
+    assert data["pipeline_status"] == "FAILED"
+    # A FAILED run has finished, so it legitimately becomes the latest health result.
+    assert data["latest_health_score"] == 0.0
+
+
+def test_health_score_404_when_only_a_running_run_exists(client, test_db_session):
+    """With nothing finished yet there is no score to report."""
+    _seed_run(test_db_session, status="RUNNING", health_score=0.0)
+
+    assert client.get("/api/v1/health-score").status_code == 404
+
+
+def test_pipeline_runs_list_exposes_running_status(client, test_db_session):
+    """The runs listing must show an active run explicitly."""
+    _seed_run(test_db_session, status="RUNNING", health_score=0.0, rows_processed=0)
+
+    run_item = client.get("/api/v1/pipeline-runs").json()["runs"][0]
+
+    assert run_item["status"] == "RUNNING"
+    assert run_item["rows_processed"] == 0
+
+
 def test_health_endpoint_reports_degraded_when_database_is_down(broken_db_client):
     """/health already handles failure itself and must keep doing so."""
     data = broken_db_client.get("/health").json()

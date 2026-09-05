@@ -24,6 +24,14 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Pipeline execution statuses. RUNNING marks a run that has started but not yet
+# reached a terminal state, so consumers can tell an active run from a finished
+# one instead of reading its not-yet-computed health score as a real result.
+RUN_STATUS_RUNNING = "RUNNING"
+RUN_STATUS_COMPLETED = "COMPLETED"
+RUN_STATUS_FAILED = "FAILED"
+
+
 class Base(DeclarativeBase):
     """Base class for DataTrust database models."""
 

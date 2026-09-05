@@ -46,6 +46,7 @@ def run_etl_pipeline(
     *,
     load_only: bool = False,
     raise_on_failure: bool = False,
+    track_run: bool = True,
 ) -> ETLPipelineResult:
     """Run the complete ETL flow; data-quality findings do not fail execution.
 
@@ -53,6 +54,9 @@ def run_etl_pipeline(
     that run validation, scoring and persistence as their own downstream tasks.
     `raise_on_failure` re-raises the original exception once the FAILED run has
     been recorded, so a scheduler can see the failure and apply its retries.
+    `track_run=False` suppresses this function's own FAILED record, for callers
+    that already own a pipeline_runs row for the wider execution; without it an
+    orchestrated failure would be written twice, as two unrelated runs.
     """
     started_at = datetime.now(timezone.utc)
     timer = perf_counter()
@@ -123,15 +127,17 @@ def run_etl_pipeline(
         # unattempted.
         rows_failed = 0 if counts["loaded"] else counts["extracted"]
 
-        failed_run_id = _persist_failed_run(
-            pipeline_name=pipeline_name,
-            started_at=started_at,
-            finished_at=finished_at,
-            error_message=f"[{stage}] {error_message}",
-            rows_processed=counts["loaded"],
-            rows_failed=rows_failed,
-            database_url=database_url,
-        )
+        failed_run_id = None
+        if track_run:
+            failed_run_id = _persist_failed_run(
+                pipeline_name=pipeline_name,
+                started_at=started_at,
+                finished_at=finished_at,
+                error_message=f"[{stage}] {error_message}",
+                rows_processed=counts["loaded"],
+                rows_failed=rows_failed,
+                database_url=database_url,
+            )
 
         if raise_on_failure:
             # The FAILED run is recorded; a bare re-raise keeps the original
