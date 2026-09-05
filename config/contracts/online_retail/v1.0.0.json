@@ -1,0 +1,104 @@
+{
+  "contract_name": "online_retail",
+  "contract_version": "1.0.0",
+  "representation": "source",
+  "description": "UCI Online Retail data contract. Canonical column names are the source (CSV/pandas) names; stored_name gives the projection written to the retail_transactions table, so both representations come from this one document.",
+  "enforced_sections": ["columns", "dtypes"],
+  "columns": [
+    {
+      "name": "InvoiceNo",
+      "stored_name": "invoice_no",
+      "dtype": "object",
+      "stored_dtype": "object",
+      "nullable": false,
+      "on_null": "FAIL"
+    },
+    {
+      "name": "StockCode",
+      "stored_name": "stock_code",
+      "dtype": "object",
+      "stored_dtype": "object",
+      "nullable": false,
+      "on_null": "FAIL"
+    },
+    {
+      "name": "Description",
+      "stored_name": "description",
+      "dtype": "object",
+      "stored_dtype": "object",
+      "nullable": true,
+      "on_null": "WARNING",
+      "note": "Missing in a small share of source rows; unusual but not fatal."
+    },
+    {
+      "name": "Quantity",
+      "stored_name": "quantity",
+      "dtype": "int64",
+      "stored_dtype": "float64",
+      "nullable": false,
+      "on_null": "FAIL",
+      "constraints": {
+        "not_equal": 0
+      },
+      "note": "Stored as float64 because the retail_transactions column is declared Float."
+    },
+    {
+      "name": "InvoiceDate",
+      "stored_name": "invoice_date",
+      "dtype": "object",
+      "stored_dtype": null,
+      "nullable": false,
+      "on_null": "FAIL",
+      "constraints": {
+        "parseable_as": "datetime"
+      },
+      "note": "stored_dtype is intentionally null: SQLite returns DATETIME as object while MySQL returns datetime64[ns], so asserting either raises false mismatches. Presence is still validated and the database enforces the real type."
+    },
+    {
+      "name": "UnitPrice",
+      "stored_name": "unit_price",
+      "dtype": "float64",
+      "stored_dtype": "float64",
+      "nullable": false,
+      "on_null": "FAIL",
+      "constraints": {
+        "min": 0,
+        "warn_when_equal": 0
+      }
+    },
+    {
+      "name": "CustomerID",
+      "stored_name": "customer_id",
+      "dtype": "float64",
+      "stored_dtype": "float64",
+      "nullable": true,
+      "on_null": "INFO",
+      "note": "Absent for guest checkouts in roughly a quarter of source rows, which is expected and must not lower the score."
+    },
+    {
+      "name": "Country",
+      "stored_name": "country",
+      "dtype": "object",
+      "stored_dtype": "object",
+      "nullable": false,
+      "on_null": "FAIL",
+      "note": "Required at source even though the database column permits NULL; database nullability is not a source-level requirement."
+    }
+  ],
+  "derived_columns": [
+    {
+      "name": "IsCancellation",
+      "stored_name": "is_cancellation",
+      "produced_by": "transformer",
+      "stored_dtype": null,
+      "note": "stored_dtype is intentionally null: boolean width differs per database driver."
+    },
+    {
+      "name": "Revenue",
+      "stored_name": "revenue",
+      "produced_by": "transformer",
+      "stored_dtype": "float64"
+    }
+  ],
+  "stored_only_columns": ["transaction_id", "loaded_at"]
+}

@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+from src.contracts.loader import load_contract
+
 # ── Load .env file if it exists ────────────────────────────────────────────
 # load_dotenv() reads a .env file and injects its contents into os.environ.
 # This means we can keep secrets out of source code entirely.
@@ -27,35 +29,15 @@ load_dotenv()
 # .parent.parent = DataTrust/   <-- project root
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# ── Source → stored column names ────────────────────────────────────────────
-# The ETL loader renames the source (CSV/pandas) columns when it writes the
-# retail_transactions table, so anything reading that table back sees the
-# stored names instead. Both the loader and the schema check read this one
-# mapping, so the two representations cannot drift apart.
-STORED_COLUMN_MAP: dict[str, str] = {
-    "InvoiceNo": "invoice_no",
-    "StockCode": "stock_code",
-    "Description": "description",
-    "Quantity": "quantity",
-    "InvoiceDate": "invoice_date",
-    "UnitPrice": "unit_price",
-    "CustomerID": "customer_id",
-    "Country": "country",
-    "IsCancellation": "is_cancellation",
-    "Revenue": "revenue",
-}
+# ── Data contract ───────────────────────────────────────────────────────────
+# The versioned contract in config/contracts/ is the single declaration of the
+# expected schema. Both representations are derived from it below, so the names
+# the ETL loader writes and the names the schema check validates cannot drift
+# apart. Set CONTRACT_VERSION to pin a version; "latest" takes the highest.
+CONTRACT_NAME: str = os.getenv("CONTRACT_NAME", "online_retail")
+CONTRACT_VERSION: str = os.getenv("CONTRACT_VERSION", "latest")
 
-# Columns the transformer derives and the loader stores alongside the source
-# columns. They are legitimate members of the stored representation.
-DERIVED_STORED_COLUMNS: list[str] = ["is_cancellation", "revenue"]
-
-# Columns the database itself owns; no source row ever carries them.
-STORED_ONLY_COLUMNS: list[str] = ["transaction_id", "loaded_at"]
-
-
-def stored_names(source_columns: list[str]) -> list[str]:
-    """Translate source column names into their stored equivalents."""
-    return [STORED_COLUMN_MAP[column] for column in source_columns if column in STORED_COLUMN_MAP]
+_CONTRACT = load_contract(CONTRACT_NAME, CONTRACT_VERSION)
 
 
 class Settings:
@@ -79,55 +61,27 @@ class Settings:
 
     # ── Dataset metadata ────────────────────────────────────────────────────
     DATASET_NAME: str = "UCI Online Retail"
-    EXPECTED_COLUMNS: list[str] = [
-        "InvoiceNo",
-        "StockCode",
-        "Description",
-        "Quantity",
-        "InvoiceDate",
-        "UnitPrice",
-        "CustomerID",
-        "Country",
-    ]
-    # Phase 2 schema contract. Keep it here so the quality engine has one
-    # configurable source of truth rather than embedding the contract in checks.
-    EXPECTED_DTYPES: dict[str, str] = {
-        "InvoiceNo": "object",
-        "StockCode": "object",
-        "Description": "object",
-        "Quantity": "int64",
-        "InvoiceDate": "object",
-        "UnitPrice": "float64",
-        "CustomerID": "float64",
-        "Country": "object",
-    }
+
+    # Which contract these expectations came from, for report provenance.
+    CONTRACT_NAME: str = CONTRACT_NAME
+    CONTRACT_VERSION: str = _CONTRACT.contract_version
+
+    # ── Source representation, from the contract ────────────────────────────
+    EXPECTED_COLUMNS: list[str] = _CONTRACT.source_columns()
+    EXPECTED_DTYPES: dict[str, str] = _CONTRACT.source_dtypes()
     UNEXPECTED_COLUMN_WARNING_COUNT: int = int(
         os.getenv("UNEXPECTED_COLUMN_WARNING_COUNT", 3)
     )
 
-    # ── Stored (retail_transactions) representation ─────────────────────────
-    # Derived from the source contract above through STORED_COLUMN_MAP, so the
-    # two representations describe the same columns and cannot diverge.
-    STORED_COLUMN_MAP: dict[str, str] = STORED_COLUMN_MAP
-    STORED_EXPECTED_COLUMNS: list[str] = (
-        stored_names(EXPECTED_COLUMNS) + DERIVED_STORED_COLUMNS + STORED_ONLY_COLUMNS
-    )
-    # Only columns whose pandas dtype is stable across backends are typed here.
-    # invoice_date, is_cancellation, transaction_id and loaded_at are omitted on
-    # purpose: SQLite returns DATETIME as object where MySQL returns
-    # datetime64[ns], and boolean/integer widths differ per driver, so asserting
-    # them would raise false mismatches rather than catch real drift. Their
-    # presence is still validated, and the database enforces their real types.
-    STORED_EXPECTED_DTYPES: dict[str, str] = {
-        "invoice_no": "object",
-        "stock_code": "object",
-        "description": "object",
-        "quantity": "float64",
-        "unit_price": "float64",
-        "customer_id": "float64",
-        "country": "object",
-        "revenue": "float64",
-    }
+    # ── Stored (retail_transactions) representation, from the same contract ──
+    # Deriving both representations from one document is what keeps the names
+    # the ETL loader writes and the names the schema check validates in step.
+    # Columns whose pandas dtype varies between backends carry no stored_dtype
+    # in the contract and are therefore absent here: their presence is still
+    # validated, and the database enforces their real types.
+    STORED_COLUMN_MAP: dict[str, str] = _CONTRACT.stored_column_map()
+    STORED_EXPECTED_COLUMNS: list[str] = _CONTRACT.stored_columns()
+    STORED_EXPECTED_DTYPES: dict[str, str] = _CONTRACT.stored_dtypes()
 
     # ── Quality score thresholds ────────────────────────────────────────────
     QUALITY_THRESHOLD_CRITICAL: float = float(

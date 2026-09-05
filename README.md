@@ -84,6 +84,9 @@ DataTrust/
 │   │   └── loader.py          # Pure CSV / Excel ingestion loader
 │   ├── profiling/
 │   │   └── profiler.py        # Dataset statistical profiler
+│   ├── contracts/
+│   │   ├── models.py          # Typed model of a versioned data contract
+│   │   └── loader.py          # Contract loading and version resolution
 │   ├── quality/
 │   │   ├── base.py            # Quality check base classes and result dataclasses
 │   │   ├── schema.py          # Schema contract validation
@@ -178,6 +181,22 @@ CREATE DATABASE IF NOT EXISTS datatrust;
 ```
 
 ---
+
+## Data Contract
+
+The expected schema is declared in a versioned contract under
+`config/contracts/<name>/v<major>.<minor>.<patch>.json`. The contract states the
+*expectation*; the quality engine's existing checks remain the validators.
+
+Source column names are canonical, and each column carries the `stored_name` it
+takes in the `retail_transactions` table, so both representations are derived
+from one document and cannot drift apart. Set `CONTRACT_VERSION` to pin a
+version (default `latest`); older versions are never overwritten, so historical
+runs stay interpretable.
+
+Contract release 1.0.0 enforces the `columns` and `dtypes` sections, listed in
+its `enforced_sections` field. Nullability and constraints are declared but not
+yet enforced — completeness and validity keep their own rules for now.
 
 ## Running the Pipeline
 
