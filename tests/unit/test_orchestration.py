@@ -153,6 +153,21 @@ def test_orchestration_tasks_flow_isolated(mock_db, lifecycle_db):
         assert quality_result["total_rows"] == 3
         assert quality_result["summary"]["total_checks"] > 0
 
+        # This stage reads the stored snapshot back out of the database, where
+        # completeness and validity used to match source column names literally:
+        # validity found no columns and returned nothing, so the validity and
+        # business_rules dimensions could never be earned on a scheduled run.
+        categories = [result["category"] for result in quality_result["results"]]
+        assert "completeness" in categories
+        assert "validity" in categories
+        validity_checks = {
+            result["check_name"]
+            for result in quality_result["results"]
+            if result["category"] == "validity"
+        }
+        assert "unit_price_validity" in validity_checks
+        assert "quantity_cancellation_logic" in validity_checks
+
         # Stage 3: Health Scoring, recorded against the run opened at stage 0
         task_instance = make_task_instance(
             start_pipeline_run=run_id,
@@ -173,6 +188,10 @@ def test_orchestration_tasks_flow_isolated(mock_db, lifecycle_db):
             run = session.get(PipelineRun, run_id)
             assert run.health_score == scoring_result["health_score"]
             assert len(run.quality_results) > 0
+            # The persisted results must include the dimensions that the stored
+            # representation previously skipped entirely.
+            persisted = {result.category for result in run.quality_results}
+            assert {"completeness", "validity"} <= persisted
             # Still open: the run is only completed after the last stage.
             assert run.status == "RUNNING"
 

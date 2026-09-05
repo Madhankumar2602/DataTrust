@@ -313,6 +313,202 @@ def test_validity_positive_unit_price_passes(clean_df):
     price_check = next(r for r in results if r.check_name == "unit_price_validity")
     assert price_check.status == CheckStatus.PASS
 
+# ── Stored-representation completeness and validity ──────────────────────────
+# Regression cover for a defect where both checks matched source column names
+# literally. On stored data CompletenessCheck applied the wrong null policy and
+# ValidityCheck found no columns at all, returning zero results and leaving the
+# validity and business_rules score dimensions permanently unearned.
+
+
+def test_stored_completeness_treats_customer_id_as_guest_checkout(stored_df):
+    """customer_id nulls are guest checkouts, exactly as CustomerID nulls are."""
+    df = stored_df.copy()
+    df.loc[0, "customer_id"] = np.nan
+
+    results = CompletenessCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "customer_id_completeness")
+    assert check.status == CheckStatus.INFO
+    assert check.status != CheckStatus.FAIL
+
+
+def test_stored_completeness_keeps_description_warning(stored_df):
+    df = stored_df.copy()
+    df.loc[0, "description"] = np.nan
+
+    results = CompletenessCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "description_completeness")
+    assert check.status == CheckStatus.WARNING
+
+
+def test_stored_completeness_still_fails_required_columns(stored_df):
+    """A required column keeps failing; only the documented exceptions are spared."""
+    df = stored_df.copy()
+    df.loc[0, "quantity"] = np.nan
+
+    results = CompletenessCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "quantity_completeness")
+    assert check.status == CheckStatus.FAIL
+
+
+def test_stored_validity_rules_execute(stored_df):
+    """The rules used to find no columns and silently return nothing."""
+    results = ValidityCheck().run(stored_df)
+
+    assert results, "ValidityCheck must produce results for stored data"
+    assert {r.check_name for r in results} == {
+        "unit_price_validity",
+        "quantity_zero",
+        "quantity_cancellation_logic",
+        "invoice_date_validity",
+    }
+
+
+def test_stored_negative_unit_price_is_detected(stored_df):
+    df = stored_df.copy()
+    df.loc[0, "unit_price"] = -5.0
+
+    results = ValidityCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "unit_price_validity")
+    assert check.status == CheckStatus.FAIL
+    assert "unit_price" in check.message
+
+
+def test_stored_zero_quantity_is_detected(stored_df):
+    df = stored_df.copy()
+    df.loc[0, "quantity"] = 0.0
+
+    results = ValidityCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "quantity_zero")
+    assert check.status == CheckStatus.FAIL
+
+
+def test_stored_unparseable_invoice_date_is_detected(stored_df):
+    df = stored_df.copy()
+    df.loc[0, "invoice_date"] = "Not a date"
+
+    results = ValidityCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "invoice_date_validity")
+    assert check.status == CheckStatus.FAIL
+
+
+def test_stored_negative_quantity_without_c_prefix_fails(stored_df):
+    """The cancellation business logic must hold on stored names too."""
+    df = stored_df.copy()
+    df.loc[0, "invoice_no"] = "536365"
+    df.loc[0, "quantity"] = -6.0
+
+    results = ValidityCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "quantity_cancellation_logic")
+    assert check.status == CheckStatus.FAIL
+
+
+def test_stored_valid_cancellation_passes(stored_df):
+    df = stored_df.copy()
+    df.loc[0, "invoice_no"] = "C536365"
+    df.loc[0, "quantity"] = -6.0
+
+    results = ValidityCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "quantity_cancellation_logic")
+    assert check.status == CheckStatus.PASS
+
+
+def test_stored_administrative_adjustment_carve_out_survives(stored_df):
+    """The zero-price, no-customer carve-out must not be lost on stored data."""
+    df = stored_df.copy()
+    df.loc[0, ["quantity", "unit_price", "customer_id"]] = [-6.0, 0.0, np.nan]
+
+    results = ValidityCheck().run(df)
+
+    check = next(r for r in results if r.check_name == "quantity_cancellation_logic")
+    assert check.status == CheckStatus.WARNING
+    assert check.metadata["administrative_adjustment_rows"] == 1
+
+
+def test_cancellation_check_name_is_stable_across_representations(stored_df, clean_df):
+    """The scorer maps this exact name onto business_rules; it must not drift."""
+    stored_names = {r.check_name for r in ValidityCheck().run(stored_df)}
+    source_names = {r.check_name for r in ValidityCheck().run(clean_df)}
+
+    assert "quantity_cancellation_logic" in stored_names
+    assert stored_names == source_names
+
+
+def test_engine_explicit_stored_representation_runs_both_checks(stored_df):
+    df = stored_df.copy()
+    df.loc[0, "customer_id"] = np.nan
+
+    report = QualityEngine("stored", representation="stored").run(df)
+
+    customer = next(
+        r for r in report["results"] if r["check_name"] == "customer_id_completeness"
+    )
+    assert customer["status"] == "INFO"
+    assert any(r["category"] == "validity" for r in report["results"])
+
+
+def test_engine_explicit_source_representation_is_unchanged(clean_df):
+    df = clean_df.copy()
+    df.loc[0, "CustomerID"] = np.nan
+
+    report = QualityEngine("source", representation="source").run(df)
+
+    customer = next(
+        r for r in report["results"] if r["check_name"] == "CustomerID_completeness"
+    )
+    assert customer["status"] == "INFO"
+    assert any(r["category"] == "validity" for r in report["results"])
+
+
+def test_engine_auto_representation_handles_both(clean_df, stored_df):
+    source_report = QualityEngine("auto-source").run(clean_df)
+    stored_report = QualityEngine("auto-stored").run(stored_df)
+
+    assert source_report["contract"]["representation"] == "source"
+    assert stored_report["contract"]["representation"] == "stored"
+    for report in (source_report, stored_report):
+        categories = {r["category"] for r in report["results"]}
+        assert "validity" in categories
+        assert "completeness" in categories
+
+
+def test_stored_validity_and_business_rules_dimensions_are_earned(stored_df):
+    """Both dimensions used to score 0/20 because no results ever reached them."""
+    from src.scoring.scorer import HealthScorer
+
+    report = QualityEngine("stored").run(stored_df)
+    score_report = HealthScorer().calculate_score(report)
+
+    assert score_report["category_scores"]["validity"]["score"] > 0.0
+    assert score_report["category_scores"]["business_rules"]["score"] > 0.0
+    assert "No validation results" not in (
+        score_report["category_scores"]["validity"]["details"]
+    )
+
+
+def test_transformed_frame_behaviour_is_unchanged(clean_df):
+    """The transformer's extra columns must still resolve as source data."""
+    df = clean_df.copy()
+    df["IsCancellation"] = [False, False]
+    df["Revenue"] = [15.3, 20.34]
+
+    report = QualityEngine("transformed").run(df)
+
+    assert report["contract"]["representation"] == "source"
+    customer = next(
+        r for r in report["results"] if r["check_name"] == "CustomerID_completeness"
+    )
+    assert customer["status"] == "PASS"
+    assert any(r["check_name"] == "unit_price_validity" for r in report["results"])
+
+
 # ── Uniqueness Tests ─────────────────────────────────────────────────────────
 
 

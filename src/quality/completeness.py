@@ -20,6 +20,7 @@ import pandas as pd
 
 from src.logger import get_logger
 from src.quality.base import BaseCheck, CheckResult, CheckStatus, Severity
+from src.quality.representation import columns_for
 
 logger = get_logger(__name__)
 
@@ -33,6 +34,10 @@ class CompletenessCheck(BaseCheck):
       - Description: Nulls are unexpected but not fatal. WARNING.
       - Other columns: Nulls are not expected. FAIL.
 
+    The policy is stated against canonical source column names and applied to
+    whichever names the frame actually uses, so stored data read back from
+    retail_transactions gets the same business treatment as the source data.
+
     Usage:
         from src.quality.completeness import CompletenessCheck
         results = CompletenessCheck().run(df)
@@ -41,11 +46,26 @@ class CompletenessCheck(BaseCheck):
     name = "CompletenessCheck"
     category = "completeness"
 
+    def __init__(self, columns: dict[str, str] | None = None) -> None:
+        """
+        Args:
+            columns: Canonical source column name -> the name it carries in the
+                     frames this check will see. QualityEngine supplies it when
+                     the representation is already known; left unset, each frame
+                     is resolved on its own.
+        """
+        self._columns = columns
+
     def run(self, df: pd.DataFrame) -> list[CheckResult]:
         logger.info("Running CompletenessCheck ...")
         total_rows = len(df)
         if total_rows == 0:
             return []
+
+        columns = self._columns or columns_for(df)
+        # Nulls here are a documented business reality, not a data defect.
+        guest_customer_column = columns.get("CustomerID")
+        optional_description_column = columns.get("Description")
 
         results = []
         for col in df.columns:
@@ -65,7 +85,7 @@ class CompletenessCheck(BaseCheck):
             missing_pct = round(missing_count / total_rows * 100, 2)
 
             # Apply dataset-specific business logic
-            if col == "CustomerID":
+            if col == guest_customer_column:
                 results.append(
                     CheckResult(
                         check_name=f"{col}_completeness",
@@ -80,7 +100,7 @@ class CompletenessCheck(BaseCheck):
                         affected_pct=missing_pct,
                     )
                 )
-            elif col == "Description":
+            elif col == optional_description_column:
                 results.append(
                     CheckResult(
                         check_name=f"{col}_completeness",

@@ -21,6 +21,7 @@ import pandas as pd
 
 from src.logger import get_logger
 from src.quality.base import BaseCheck, CheckResult, CheckStatus, Severity
+from src.quality.representation import columns_for
 
 logger = get_logger(__name__)
 
@@ -28,6 +29,10 @@ logger = get_logger(__name__)
 class ValidityCheck(BaseCheck):
     """
     Checks for business-logic validity across the dataset.
+
+    The rules are written against canonical source column names and applied to
+    whichever names the frame actually uses, so the same rules run on stored data
+    read back from retail_transactions instead of silently finding no columns.
 
     Usage:
         from src.quality.validity import ValidityCheck
@@ -37,6 +42,16 @@ class ValidityCheck(BaseCheck):
     name = "ValidityCheck"
     category = "validity"
 
+    def __init__(self, columns: dict[str, str] | None = None) -> None:
+        """
+        Args:
+            columns: Canonical source column name -> the name it carries in the
+                     frames this check will see. QualityEngine supplies it when
+                     the representation is already known; left unset, each frame
+                     is resolved on its own.
+        """
+        self._columns = columns
+
     def run(self, df: pd.DataFrame) -> list[CheckResult]:
         logger.info("Running ValidityCheck ...")
         results = []
@@ -45,21 +60,39 @@ class ValidityCheck(BaseCheck):
         if total_rows == 0:
             return results
 
-        if "UnitPrice" in df.columns:
-            results.append(self._check_unit_price(df, total_rows))
+        columns = self._columns or columns_for(df)
+        price_column = columns.get("UnitPrice")
+        quantity_column = columns.get("Quantity")
+        invoice_column = columns.get("InvoiceNo")
+        date_column = columns.get("InvoiceDate")
+        customer_column = columns.get("CustomerID")
 
-        if "Quantity" in df.columns and "InvoiceNo" in df.columns:
-            results.extend(self._check_quantity(df, total_rows))
+        if price_column in df.columns:
+            results.append(self._check_unit_price(df, total_rows, price_column))
 
-        if "InvoiceDate" in df.columns:
-            results.append(self._check_invoice_date(df, total_rows))
+        if quantity_column in df.columns and invoice_column in df.columns:
+            results.extend(
+                self._check_quantity(
+                    df,
+                    total_rows,
+                    quantity_column,
+                    invoice_column,
+                    price_column,
+                    customer_column,
+                )
+            )
+
+        if date_column in df.columns:
+            results.append(self._check_invoice_date(df, total_rows, date_column))
 
         passed = sum(1 for r in results if r.passed)
         logger.info(f"  ValidityCheck: {passed}/{len(results)} rules passed")
         return results
 
-    def _check_unit_price(self, df: pd.DataFrame, total_rows: int) -> CheckResult:
-        price = df["UnitPrice"]
+    def _check_unit_price(
+        self, df: pd.DataFrame, total_rows: int, price_column: str
+    ) -> CheckResult:
+        price = df[price_column]
         # Convert to numeric in case of type mismatch (coercing errors to NaN)
         price_num = pd.to_numeric(price, errors="coerce")
 
@@ -72,7 +105,10 @@ class ValidityCheck(BaseCheck):
                 category=self.category,
                 status=CheckStatus.FAIL,
                 severity=Severity.HIGH,
-                message=f"UnitPrice is negative in {negative_count} rows. Prices must be >= 0.",
+                message=(
+                    f"{price_column} is negative in {negative_count} rows. "
+                    "Prices must be >= 0."
+                ),
                 affected_rows=negative_count,
                 affected_pct=round(negative_count / total_rows * 100, 2)
             )
@@ -84,7 +120,7 @@ class ValidityCheck(BaseCheck):
                 status=CheckStatus.WARNING,
                 severity=Severity.LOW,
                 message=(
-                    f"UnitPrice is zero in {zero_count} rows. "
+                    f"{price_column} is zero in {zero_count} rows. "
                     "This may indicate free items or missing data."
                 ),
                 affected_rows=zero_count,
@@ -96,13 +132,21 @@ class ValidityCheck(BaseCheck):
             category=self.category,
             status=CheckStatus.PASS,
             severity=Severity.INFO,
-            message="All UnitPrice values are > 0."
+            message=f"All {price_column} values are > 0."
         )
 
-    def _check_quantity(self, df: pd.DataFrame, total_rows: int) -> list[CheckResult]:
+    def _check_quantity(
+        self,
+        df: pd.DataFrame,
+        total_rows: int,
+        quantity_column: str,
+        invoice_column: str,
+        price_column: str | None,
+        customer_column: str | None,
+    ) -> list[CheckResult]:
         results = []
-        qty = pd.to_numeric(df["Quantity"], errors="coerce")
-        inv = df["InvoiceNo"].astype(str)
+        qty = pd.to_numeric(df[quantity_column], errors="coerce")
+        inv = df[invoice_column].astype(str)
 
         # 1. Zero quantity check
         zero_count = int((qty == 0).sum())
@@ -113,7 +157,7 @@ class ValidityCheck(BaseCheck):
                 status=CheckStatus.FAIL,
                 severity=Severity.MEDIUM,
                 message=(
-                    f"Quantity is zero in {zero_count} rows. "
+                    f"{quantity_column} is zero in {zero_count} rows. "
                     "Transactions must have non-zero quantity."
                 ),
                 affected_rows=zero_count,
@@ -138,10 +182,10 @@ class ValidityCheck(BaseCheck):
         # but are not treated as definite invalid data without source-system
         # documentation proving otherwise.
         is_adjustment = pd.Series(False, index=df.index)
-        adjustment_columns = {"UnitPrice", "CustomerID"}
-        if adjustment_columns.issubset(df.columns):
-            zero_price = pd.to_numeric(df["UnitPrice"], errors="coerce").eq(0)
-            missing_customer = df["CustomerID"].isna()
+        adjustment_columns = {price_column, customer_column}
+        if None not in adjustment_columns and adjustment_columns.issubset(df.columns):
+            zero_price = pd.to_numeric(df[price_column], errors="coerce").eq(0)
+            missing_customer = df[customer_column].isna()
             is_adjustment = is_negative & ~is_cancel & zero_price & missing_customer
 
         # Negative qty but NOT a cancellation or documented adjustment pattern.
@@ -196,13 +240,15 @@ class ValidityCheck(BaseCheck):
 
         return results
 
-    def _check_invoice_date(self, df: pd.DataFrame, total_rows: int) -> CheckResult:
+    def _check_invoice_date(
+        self, df: pd.DataFrame, total_rows: int, date_column: str
+    ) -> CheckResult:
         # ``format='mixed'`` handles the source CSV's date strings and avoids
         # pandas guessing a single format from the first value.
-        dates = pd.to_datetime(df["InvoiceDate"], errors="coerce", format="mixed")
+        dates = pd.to_datetime(df[date_column], errors="coerce", format="mixed")
         # We only count it as invalid if the original value was NOT null
         # (Missing values are handled by CompletenessCheck, not ValidityCheck)
-        original_missing = df["InvoiceDate"].isnull()
+        original_missing = df[date_column].isnull()
         parse_errors = int((dates.isnull() & ~original_missing).sum())
 
         if parse_errors > 0:
@@ -211,7 +257,9 @@ class ValidityCheck(BaseCheck):
                 category=self.category,
                 status=CheckStatus.FAIL,
                 severity=Severity.HIGH,
-                message=f"Failed to parse {parse_errors} InvoiceDate values as datetimes.",
+                message=(
+                    f"Failed to parse {parse_errors} {date_column} values as datetimes."
+                ),
                 affected_rows=parse_errors,
                 affected_pct=round(parse_errors / total_rows * 100, 2)
             )
@@ -221,5 +269,5 @@ class ValidityCheck(BaseCheck):
             category=self.category,
             status=CheckStatus.PASS,
             severity=Severity.INFO,
-            message="All InvoiceDate values parsed successfully."
+            message=f"All {date_column} values parsed successfully."
         )

@@ -24,6 +24,7 @@ from src.logger import get_logger
 from src.quality.base import CheckResult, CheckStatus, Severity
 from src.quality.schema import SchemaCheck
 from src.quality.completeness import CompletenessCheck
+from src.quality.representation import resolve_columns
 from src.quality.validity import ValidityCheck
 from src.quality.uniqueness import UniquenessCheck
 
@@ -41,8 +42,10 @@ class QualityEngine:
     Orchestrates data quality validation checks.
 
     Expectations come from the versioned data contract; the checks below remain
-    the validators. Only SchemaCheck is contract-driven today — completeness,
-    validity and uniqueness keep their own rules.
+    the validators. Schema expectations and the source/stored column naming both
+    come from the contract, so completeness and validity apply their own business
+    rules to whichever representation they are handed. UniquenessCheck compares
+    whole rows and needs no column names.
     """
 
     def __init__(
@@ -63,12 +66,25 @@ class QualityEngine:
             settings.CONTRACT_NAME, settings.CONTRACT_VERSION
         )
         # Register all the checks we want to run
+        columns = self._resolved_columns()
         self.checks = [
             self._build_schema_check(),
-            CompletenessCheck(),
-            ValidityCheck(),
+            CompletenessCheck(columns),
+            ValidityCheck(columns),
             UniquenessCheck(),
         ]
+
+    def _resolved_columns(self) -> dict[str, str] | None:
+        """Column naming for the checks that reference individual columns.
+
+        An explicit representation is resolved here once, from the contract, so
+        the checks never have to work it out for themselves. "auto" means the
+        representation is only knowable per DataFrame, so it stays None and each
+        check resolves the frame it is given through the same shared helper.
+        """
+        if self.representation == "auto":
+            return None
+        return resolve_columns(self.representation, self.contract.stored_column_map())
 
     def _build_schema_check(self) -> SchemaCheck:
         """Feed the contract's expectations into the existing schema validator.

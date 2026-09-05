@@ -37,6 +37,7 @@ import pandas as pd
 from src.config import settings
 from src.logger import get_logger
 from src.quality.base import BaseCheck, CheckResult, CheckStatus, Severity
+from src.quality.representation import STORED, detect_representation
 
 logger = get_logger(__name__)
 
@@ -108,11 +109,7 @@ class SchemaCheck(BaseCheck):
         if self._pinned:
             return "configured", self.expected_columns, self.expected_dtypes
 
-        present = set(df.columns)
-        source_matches = len(present & set(self.expected_columns))
-        stored_matches = len(present & set(settings.STORED_EXPECTED_COLUMNS))
-
-        if stored_matches > source_matches:
+        if detect_representation(df) == STORED:
             return (
                 "stored",
                 list(settings.STORED_EXPECTED_COLUMNS),
