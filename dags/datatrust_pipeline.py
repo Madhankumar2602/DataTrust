@@ -28,9 +28,7 @@ from src.anomaly.detector import AnomalyDetector
 from src.database.connection import create_database_engine, create_session_factory
 from src.database.models import Base
 from src.database.repository import QualityRepository
-from src.etl.extractor import extract_data
-from src.etl.loader import load_transformed_data
-from src.etl.transformer import transform_data
+from src.etl.pipeline import run_etl_pipeline
 from src.quality.engine import QualityEngine
 from src.scoring.scorer import HealthScorer
 
@@ -45,32 +43,27 @@ def run_extract_transform_load(**context: Any) -> dict[str, Any]:
     """
     Extract raw Online Retail data, normalize and derive features losslessly,
     and refresh the MySQL retail_transactions snapshot table.
+
+    Execution is delegated to the reusable pipeline in `src/etl/pipeline.py`,
+    which owns extraction, transformation, loading and ETL failure tracking.
+    This task only orchestrates: it stops at the load stage because validation,
+    scoring and anomaly detection are separate downstream tasks, and it lets the
+    original exception reach Airflow so retries behave normally.
     """
     logger.info("[ORCHESTRATION] Stage 1/4: Starting Extract, Transform, Load (ETL)...")
 
-    # Extract
-    extraction = extract_data()
-    logger.info("[ETL] Extracted %s rows from raw source", f"{extraction.rows_extracted:,}")
-
-    # Transform
-    transformation = transform_data(extraction.dataframe)
-    logger.info("[ETL] Transformed %s rows losslessly", f"{transformation.rows_transformed:,}")
-
-    # Load to MySQL
-    engine = create_database_engine()
-    Base.metadata.create_all(engine)
-    session_factory = create_session_factory(engine)
-
-    with session_factory() as session:
-        load_result = load_transformed_data(session, transformation.dataframe)
-        session.commit()
+    result = run_etl_pipeline(
+        pipeline_name="datatrust_daily_pipeline",
+        load_only=True,
+        raise_on_failure=True,
+    )
 
     summary = {
-        "status": "SUCCESS",
-        "rows_extracted": extraction.rows_extracted,
-        "rows_transformed": transformation.rows_transformed,
-        "rows_loaded": load_result.rows_loaded,
-        "duration_seconds": load_result.duration_seconds,
+        "status": result.status,
+        "rows_extracted": result.rows_extracted,
+        "rows_transformed": result.rows_transformed,
+        "rows_loaded": result.rows_loaded,
+        "duration_seconds": result.duration_seconds,
     }
     logger.info("[ORCHESTRATION] Stage 1/4 Complete: %s", summary)
     return summary

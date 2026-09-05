@@ -43,8 +43,17 @@ def run_etl_pipeline(
     source_path: str | Path | None = None,
     database_url: str | None = None,
     pipeline_name: str = "online_retail_etl",
+    *,
+    load_only: bool = False,
+    raise_on_failure: bool = False,
 ) -> ETLPipelineResult:
-    """Run the complete ETL flow; data-quality findings do not fail execution."""
+    """Run the complete ETL flow; data-quality findings do not fail execution.
+
+    `load_only` stops after the load stage, for callers such as the Airflow DAG
+    that run validation, scoring and persistence as their own downstream tasks.
+    `raise_on_failure` re-raises the original exception once the FAILED run has
+    been recorded, so a scheduler can see the failure and apply its retries.
+    """
     started_at = datetime.now(timezone.utc)
     timer = perf_counter()
     counts: dict[str, int] = {"extracted": 0, "transformed": 0, "loaded": 0}
@@ -67,34 +76,41 @@ def run_etl_pipeline(
         engine = create_database_engine(database_url)
         Base.metadata.create_all(engine)
         session_factory = create_session_factory(engine)
+        quality_report = None
+        score_report = None
+        stored_run = None
         with session_factory() as session:
             load_result = load_transformed_data(session, transformation.dataframe)
             counts["loaded"] = load_result.rows_loaded
 
-            stage = "VALIDATE"
-            quality_report = QualityEngine("UCI Online Retail Transformed").run(
-                transformation.dataframe
-            )
-            stage = "SCORE"
-            score_report = HealthScorer().calculate_score(quality_report)
+            if load_only:
+                session.commit()
+            else:
+                stage = "VALIDATE"
+                quality_report = QualityEngine("UCI Online Retail Transformed").run(
+                    transformation.dataframe
+                )
+                stage = "SCORE"
+                score_report = HealthScorer().calculate_score(quality_report)
 
-            stage = "PERSIST"
-            stored_run = QualityRepository(session).save_run(
-                quality_report,
-                score_report,
-                pipeline_name,
-                started_at,
-                datetime.now(timezone.utc),
-                "SUCCESS",
-            )
+                stage = "PERSIST"
+                stored_run = QualityRepository(session).save_run(
+                    quality_report,
+                    score_report,
+                    pipeline_name,
+                    started_at,
+                    datetime.now(timezone.utc),
+                    "SUCCESS",
+                )
 
         finished_at = datetime.now(timezone.utc)
         return ETLPipelineResult(
             pipeline_name, "SUCCESS", started_at, finished_at, round(perf_counter() - timer, 4),
-            counts["extracted"], counts["transformed"], counts["loaded"], score_report["score"],
-            quality_report["summary"]["failed"],
-            quality_report["summary"]["warnings"],
-            stored_run.run_id,
+            counts["extracted"], counts["transformed"], counts["loaded"],
+            score_report["score"] if score_report else None,
+            quality_report["summary"]["failed"] if quality_report else 0,
+            quality_report["summary"]["warnings"] if quality_report else 0,
+            stored_run.run_id if stored_run else None,
         )
     except Exception as exc:
         finished_at = datetime.now(timezone.utc)
@@ -116,6 +132,11 @@ def run_etl_pipeline(
             rows_failed=rows_failed,
             database_url=database_url,
         )
+
+        if raise_on_failure:
+            # The FAILED run is recorded; a bare re-raise keeps the original
+            # exception and traceback intact for the caller's error handling.
+            raise
 
         return ETLPipelineResult(
             pipeline_name, "FAILED", started_at, finished_at, duration,

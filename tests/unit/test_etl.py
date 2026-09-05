@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from src.database.connection import create_database_engine, create_session_factory
-from src.database.models import Base, RetailTransaction
+from src.database.models import Base, PipelineRun, RetailTransaction
 from src.etl.extractor import extract_data
 from src.etl.loader import load_transformed_data
 from src.etl.pipeline import run_etl_pipeline
@@ -135,6 +135,41 @@ def test_pipeline_stops_on_transformation_failure(csv_path, retail_df, tmp_path)
     session.close()
     assert stored.rows_failed == 2
     assert stored.status == "FAILED"
+
+
+def test_pipeline_load_only_stops_after_load(csv_path, tmp_path):
+    """load_only loads the snapshot but leaves validation/scoring to the caller."""
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'run.db'}"
+    result = run_etl_pipeline(csv_path, db_url, load_only=True)
+
+    assert result.status == "SUCCESS"
+    assert result.rows_extracted == result.rows_transformed == result.rows_loaded == 2
+    # No validation, scoring or run persistence happened in this mode.
+    assert result.health_score is None
+    assert result.quality_failures == 0
+    assert result.run_id is None
+
+    engine = create_database_engine(db_url)
+    session = create_session_factory(engine)()
+    # The snapshot is committed, but no pipeline_runs row was written here: the
+    # caller's own downstream stage owns that record.
+    assert session.query(RetailTransaction).count() == 2
+    assert session.query(PipelineRun).count() == 0
+    session.close()
+
+
+def test_pipeline_raise_on_failure_reraises_original_exception(tmp_path):
+    """raise_on_failure records the FAILED run, then re-raises the real exception."""
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'run.db'}"
+
+    with pytest.raises(FileNotFoundError):
+        run_etl_pipeline(tmp_path / "absent.csv", db_url, raise_on_failure=True)
+
+    engine = create_database_engine(db_url)
+    session = create_session_factory(engine)()
+    stored = session.query(PipelineRun).filter_by(status="FAILED").one()
+    session.close()
+    assert "EXTRACT" in stored.error_message
 
 
 def test_pipeline_surfaces_load_failure(csv_path):
