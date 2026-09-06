@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session, selectinload
 from src.database.models import (
     RUN_STATUS_RUNNING,
     AnomalyResult,
+    EtlWatermark,
     PipelineRun,
     QualityResult,
+    RetailTransaction,
 )
 
 if TYPE_CHECKING:
@@ -378,6 +380,80 @@ class QualityRepository:
     def count_anomalies(self) -> int:
         """Return how many anomalies are stored, ignoring pagination."""
         return int(self.session.scalar(select(func.count()).select_from(AnomalyResult)) or 0)
+
+    # ── Incremental ETL checkpoint ───────────────────────────────────────────
+
+    def get_watermark(self, pipeline_name: str) -> EtlWatermark | None:
+        """Return the stored checkpoint for a pipeline, if one exists yet."""
+        return self.session.get(EtlWatermark, pipeline_name)
+
+    def get_loaded_high_water_mark(self) -> datetime | None:
+        """Highest invoice_date the target table actually holds.
+
+        Used as a fallback when no checkpoint row exists but the table is
+        already populated, so switching incremental mode on against an existing
+        warehouse resumes from the real data instead of reloading all of it.
+        """
+        return self.session.scalar(select(func.max(RetailTransaction.invoice_date)))
+
+    def advance_watermark(
+        self,
+        pipeline_name: str,
+        watermark_value: datetime,
+        rows_loaded: int = 0,
+        run_id: int | None = None,
+    ) -> EtlWatermark:
+        """Move a pipeline's checkpoint forward after a load has been committed.
+
+        Never moves backwards: a rerun of an older batch must not rewind the
+        resume point and cause the newer rows to be considered again.
+        """
+        watermark = self.session.get(EtlWatermark, pipeline_name)
+        if watermark is None:
+            watermark = EtlWatermark(
+                pipeline_name=pipeline_name,
+                watermark_value=watermark_value,
+                rows_loaded=rows_loaded,
+                last_run_id=run_id,
+            )
+            self.session.add(watermark)
+        else:
+            if watermark_value > watermark.watermark_value:
+                watermark.watermark_value = watermark_value
+            watermark.rows_loaded = rows_loaded
+            watermark.last_run_id = run_id
+        watermark.updated_at = datetime.now(timezone.utc)
+
+        try:
+            self.session.commit()
+            self.session.refresh(watermark)
+            return watermark
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def reset_watermark(self, pipeline_name: str) -> None:
+        """Clear a checkpoint so the next run performs a full load."""
+        watermark = self.session.get(EtlWatermark, pipeline_name)
+        if watermark is None:
+            return
+        try:
+            self.session.delete(watermark)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def get_rows_at_or_after(self, watermark_value: datetime) -> list[RetailTransaction]:
+        """Rows already stored at or after a timestamp, for boundary reconciliation.
+
+        Only the window around the checkpoint is read back, so an incremental
+        run never has to pull the whole table into memory to stay idempotent.
+        """
+        statement = select(RetailTransaction).where(
+            RetailTransaction.invoice_date >= watermark_value
+        )
+        return list(self.session.scalars(statement))
 
     def _runs_query(self) -> Select[tuple[PipelineRun]]:
         return select(PipelineRun).options(selectinload(PipelineRun.quality_results))

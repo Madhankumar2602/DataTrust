@@ -198,6 +198,60 @@ Contract release 1.0.0 enforces the `columns` and `dtypes` sections, listed in
 its `enforced_sections` field. Nullability and constraints are declared but not
 yet enforced — completeness and validity keep their own rules for now.
 
+## Incremental ETL and Idempotency
+
+By default the pipeline replaces the whole `retail_transactions` snapshot on
+every run. That is simple and correct, but it rewrites 541,909 rows to pick up a
+handful of new ones, and the cost grows with the dataset rather than with the
+change. Incremental mode loads only what is actually new:
+
+```bash
+python run_etl.py --incremental
+```
+
+**The watermark.** After a successful load the pipeline records the highest
+source `invoice_date` it has proven loaded, in the `etl_watermarks` table. That
+checkpoint is durable state, read at the start of the next run to decide where
+to resume. With no checkpoint and an empty table the run performs a full load;
+with no checkpoint but a populated table it resumes from the newest stored row,
+so enabling the feature on an existing warehouse does not reload it.
+
+**Why a watermark alone is not enough.** `invoice_date` is far from unique — the
+source holds roughly 23,000 distinct timestamps across 541,909 rows, up to 1,114
+rows share a single timestamp, and 15 sit on the newest one. Comparing with `>`
+would silently drop every row on the boundary; comparing with `>=` would reload
+them on every run. So the watermark is only a coarse filter, deliberately
+inclusive, and the boundary is settled exactly by reconciliation.
+
+**Idempotency by reconciliation.** Candidate rows are matched against the rows
+already stored in the same window using a fingerprint of the eight source
+fields: `InvoiceNo`, `StockCode`, `Description`, `Quantity`, `InvoiceDate`,
+`UnitPrice`, `CustomerID`, `Country`. Matching counts *occurrences* rather than
+values, so re-running the same batch loads nothing while genuinely new rows
+still load.
+
+**Source duplicates are preserved.** The dataset legitimately contains 5,268
+exact duplicate rows and DataTrust reports them as a quality finding, so they
+must survive the load. Because reconciliation is a multiset difference, three
+identical source rows against two stored ones load exactly one more — never zero
+(losing a real row) and never three (duplicating on rerun). No uniqueness
+constraint is added to the table, and the duplicate-detection check is unchanged.
+
+**Failures never advance the checkpoint.** The watermark is written only after
+the load has been committed. If any stage fails, the run is recorded FAILED and
+the checkpoint keeps its previous value, so the next attempt reprocesses exactly
+the batch that failed. Retrying is therefore always safe.
+
+**Late-arriving records.** A watermark cannot see a row stamped earlier than the
+last load. `--lookback-days N` widens the window to re-examine recent history;
+because reconciliation removes anything already stored, a lookback can only find
+missed rows, never duplicate loaded ones.
+
+**Airflow.** Orchestration is unchanged: the DAG still delegates to
+`run_etl_pipeline` in `src/etl/pipeline.py`, so incremental behaviour, the run
+lifecycle and retry semantics are identical whether the pipeline is triggered by
+Airflow or run standalone.
+
 ## Running the Pipeline
 
 You can run individual pipeline stages via CLI runners:

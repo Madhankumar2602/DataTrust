@@ -141,6 +141,32 @@ class RetailTransaction(Base):
     )
 
 
+class EtlWatermark(Base):
+    """The resume point of the last successful incremental load, per pipeline.
+
+    Kept in its own table rather than as a column on pipeline_runs: a run is a
+    historical event, whereas the watermark is current state that is read before
+    a run starts and rewritten only after one succeeds. A new table also means
+    the checkpoint arrives through the existing create_all() call, without an
+    ALTER against the live retail_transactions history.
+    """
+
+    __tablename__ = "etl_watermarks"
+
+    pipeline_name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    # Highest source invoice_date proven loaded. Naive to match the stored
+    # retail_transactions.invoice_date column it is compared against.
+    watermark_value: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False), nullable=False
+    )
+    # The run that last advanced this checkpoint, for tracing a load back.
+    last_run_id: Mapped[int | None] = mapped_column(Integer)
+    rows_loaded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
 class AnomalyResult(Base):
     """Persist detected data anomalies for historical analysis."""
 
