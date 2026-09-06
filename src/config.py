@@ -39,6 +39,39 @@ CONTRACT_VERSION: str = os.getenv("CONTRACT_VERSION", "latest")
 
 _CONTRACT = load_contract(CONTRACT_NAME, CONTRACT_VERSION)
 
+# ── Database URL compatibility ──────────────────────────────────────────────
+# This project pins mysql-connector-python, so SQLAlchemy needs the driver
+# spelled out as mysql+mysqlconnector://. Managed providers hand out a bare
+# mysql:// URL instead, which selects a different (uninstalled) driver and
+# fails at connect time. Normalising here means a provider's own connection
+# string can be pasted straight into DATABASE_URL without editing it by hand.
+MYSQL_DRIVER = "mysql+mysqlconnector"
+
+
+def normalise_database_url(database_url: str) -> str:
+    """Give a bare mysql:// URL the driver this project actually installs.
+
+    Any URL that already names a driver (mysql+mysqlconnector, mysql+pymysql)
+    or uses another backend entirely (sqlite, postgresql) is returned untouched.
+    """
+    scheme, separator, remainder = database_url.partition("://")
+    if not separator or scheme.lower() != "mysql":
+        return database_url
+    return f"{MYSQL_DRIVER}://{remainder}"
+
+
+def _cors_origins() -> list[str]:
+    """Origins allowed to call the API, from CORS_ALLOW_ORIGINS.
+
+    Unset means "any origin", which suits local development and a public,
+    unauthenticated read-only API. A deployment names its dashboard origin
+    explicitly, as a comma-separated list.
+    """
+    configured = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+    if not configured or configured == "*":
+        return ["*"]
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
 
 class Settings:
     """
@@ -109,16 +142,28 @@ class Settings:
     # ── Application ─────────────────────────────────────────────────────────
     APP_ENV: str = os.getenv("APP_ENV", "development")
 
+    # ── API access control ──────────────────────────────────────────────────
+    # Credentials are only ever allowed alongside explicitly named origins: the
+    # CORS specification forbids pairing them with a "*" wildcard, and browsers
+    # reject that combination outright. The test is membership, not equality, so
+    # a wildcard mixed into a list of real origins still disables credentials
+    # rather than slipping through as "not exactly ["*"]".
+    CORS_ALLOW_ORIGINS: list[str] = _cors_origins()
+    CORS_ALLOW_CREDENTIALS: bool = "*" not in _cors_origins()
+
     @property
     def DATABASE_URL(self) -> str:
-        """Return the database URL supplied through the untracked environment."""
+        """Return the database URL supplied through the untracked environment.
+
+        Normalised so a managed provider's bare mysql:// string works as given.
+        """
         database_url = os.getenv("DATABASE_URL")
         if not database_url:
             raise ValueError(
                 "DATABASE_URL is not configured. Copy .env.example to .env "
                 "and set your database connection URL."
             )
-        return database_url
+        return normalise_database_url(database_url)
 
     def ensure_directories(self) -> None:
         """Create required directories if they don't already exist."""

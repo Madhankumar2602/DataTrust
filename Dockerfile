@@ -31,8 +31,19 @@ RUN useradd --create-home --uid 10001 datatrust \
     && chown -R datatrust:datatrust /app
 USER datatrust
 
+# The image is a deployment artefact, so it defaults to production and keeps
+# Uvicorn's autoreloader off. src/config.py still defaults to development for
+# someone running the code directly, outside a container. Declared after the
+# dependency install so changing it cannot invalidate the cached pip layer.
+ENV APP_ENV=production
+
 # 8000 = FastAPI, 8501 = Streamlit. Which one is used depends on the command.
 EXPOSE 8000 8501
 
 # Default role is the API. docker-compose overrides this for the other two.
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+#
+# run_api.py rather than a hardcoded `uvicorn --port 8000`: it reads HOST and
+# PORT from the environment, so a platform that assigns a port at runtime is
+# served on the port it actually routes to, while still defaulting to 8000
+# when PORT is unset.
+CMD ["python", "run_api.py"]

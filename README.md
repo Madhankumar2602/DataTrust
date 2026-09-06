@@ -441,6 +441,56 @@ expected empty-data response, not a failure.
 
 ---
 
+## Cloud Deployment (Railway)
+
+> Deployment readiness only — the project is **not yet deployed**. This section
+> records the intended topology and the settings the code expects.
+
+The same image serves every application role, so one repository builds all
+services. The intended topology is four services:
+
+| Service | Role | Public | Start command |
+|---|---|---|---|
+| MySQL | Managed database plugin | No — private network | — |
+| `api` | FastAPI | Yes | `python run_api.py` |
+| `dashboard` | Streamlit | Yes | see below |
+| `db-init` | One-off schema creation | No | `python scripts/init_db.py` |
+
+Dashboard start command:
+
+```bash
+streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true
+```
+
+**Ports.** Railway assigns a port at runtime and routes to it. `run_api.py`
+reads `PORT` (falling back to 8000), and the Dockerfile's default command uses
+it rather than a hardcoded `uvicorn --port 8000`. Streamlit takes the same value
+through `--server.port=$PORT`.
+
+**Database URL.** Set `DATABASE_URL` to the managed instance using its private
+host. A provider's bare `mysql://` string is accepted and normalised to the
+`mysql+mysqlconnector://` driver this project pins, so the value can be pasted
+across unchanged.
+
+**Schema.** No migration is required for a fresh database: `create_all()`
+creates all five tables, including `etl_watermarks`, with their current
+definitions. `scripts/init_db.py` is idempotent and loads no data.
+
+**Environment.** Set `APP_ENV=production` so Uvicorn's autoreloader stays off,
+and name the dashboard origin in `CORS_ALLOW_ORIGINS` once its domain exists.
+Pin `CONTRACT_VERSION` so a new contract file cannot silently change how a
+deployed pipeline scores. See `.env.example` for the full list.
+
+**Data.** The 45 MB source CSV is excluded from both Git and the image, so a
+freshly deployed stack starts with an empty database — the dashboard reports
+this rather than failing. Loading the initial dataset is a separate one-off
+task, and is safe to retry because `run_etl.py --incremental` is idempotent.
+
+Airflow is not deployed; it remains a local development orchestrator, and its
+callables stay importable and tested.
+
+---
+
 ## Testing & Quality Assurance
 
 Run the complete test suite with Pytest:

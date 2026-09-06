@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.api.routes import router
+from src.config import settings
 from src.logger import get_logger
 
 logger = get_logger("api")
@@ -28,11 +29,15 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS configuration (permissive for portfolio frontend and local development)
+# CORS is configuration-driven: CORS_ALLOW_ORIGINS names the origins allowed to
+# call this API, as a comma-separated list. Left unset it stays open, which
+# suits local development and a public read-only API; a deployment names its
+# dashboard origin instead. Credentials are only enabled for explicit origins,
+# because a "*" wildcard combined with credentials is rejected by browsers.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.CORS_ALLOW_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
