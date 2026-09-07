@@ -41,11 +41,21 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-
+st.markdown(
+    """
+    <style>
+    div[data-testid="stMetricValue"] {
+        font-size: 1.8rem;
+        white-space: nowrap;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
+
 
 @st.cache_resource
 def get_engine() -> Engine:
