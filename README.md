@@ -7,45 +7,83 @@
 ## Architecture
 
 ```
+
 Raw CSV Dataset
-       │
-       ▼
- ┌───────────┐
- │    ETL    │  Lossless extraction & transformation (batch load)
- └─────┬─────┘
-       │
-       ▼
- ┌───────────┐
- │   MySQL   │  Normalized staging table (`retail_transactions`)
- └─────┬─────┘
-       │
-       ▼
- ┌───────────┐
- │  Quality  │  Schema, Completeness, Validity, Uniqueness checks
- └─────┬─────┘
-       │
-       ▼
- ┌───────────┐
- │  Scoring  │  Weighted 0–100 Data Health Score & tier categorization
- └─────┬─────┘
-       │
-       ▼
- ┌───────────┐
- │  Anomaly  │  Statistical rolling Z-score & domain heuristics
- └─────┬─────┘
-       │
-       ▼
- ┌───────────┐
- │  History  │  Persistent audit log (`pipeline_runs`, `quality_results`, `anomaly_results`)
- └─────┬─────┘
-       │
-       ▼
- ┌───────────┐
- │ Dashboard │  Streamlit + Plotly interactive observability UI
- └───────────┘
+
+       │
+
+       ▼
+
+ ┌───────────┐
+
+ │    ETL    │  Lossless extraction & transformation (batch load)
+
+ └─────┬─────┘
+
+       │
+
+       ▼
+
+ ┌───────────┐
+
+ │   MySQL   │  Normalized staging table (`retail_transactions`)
+
+ └─────┬─────┘
+
+       │
+
+       ▼
+
+ ┌───────────┐
+
+ │  Quality  │  Schema, Completeness, Validity, Uniqueness checks
+
+ └─────┬─────┘
+
+       │
+
+       ▼
+
+ ┌───────────┐
+
+ │  Scoring  │  Weighted 0–100 Data Health Score & tier categorization
+
+ └─────┬─────┘
+
+       │
+
+       ▼
+
+ ┌───────────┐
+
+ │  Anomaly  │  Statistical rolling Z-score & domain heuristics
+
+ └─────┬─────┘
+
+       │
+
+       ▼
+
+ ┌───────────┐
+
+ │  History  │  Persistent audit log (`pipeline_runs`, `quality_results`, `anomaly_results`)
+
+ └─────┬─────┘
+
+       │
+
+       ▼
+
+ ┌───────────┐
+
+ │ Dashboard │  Streamlit + Plotly interactive observability UI
+
+ └───────────┘
+
 ```
 
 - **Orchestration**: Apache Airflow DAG (`dags/datatrust_pipeline.py`) coordinates the sequential execution, dependencies, and retries across stages.
+
 - **Continuous Integration**: GitHub Actions (`.github/workflows/ci.yml`) validates the entire test suite on every push and pull request.
 
 ---
@@ -53,13 +91,21 @@ Raw CSV Dataset
 ## Technology Stack
 
 | Layer | Technology | Description |
+
 |---|---|---|
+
 | **Runtime** | Python 3.13 | Core execution environment |
-| **Data Processing** | Pandas 2.2, NumPy 2.1 | In-memory extraction, transformation, and statistical calculations |
+
+| **Data Processing** | Pandas 2.2, NumPy 2.5 | In-memory extraction, transformation, and statistical calculations |
+
 | **Database & ORM** | MySQL 8.0+, SQLAlchemy 2.0 | Transaction staging, pipeline run tracking, quality metrics, anomaly records |
+
 | **Observability** | Streamlit, Plotly | Interactive analytics and data quality monitoring dashboard |
+
 | **Orchestration** | Apache Airflow | Multi-stage pipeline scheduling and execution flow |
+
 | **Testing** | Pytest | Comprehensive unit test suite (isolated in-memory SQLite fixtures) |
+
 | **CI/CD** | GitHub Actions | Automated build and test validation |
 
 ---
@@ -67,76 +113,147 @@ Raw CSV Dataset
 ## Project Structure
 
 ```
+
 DataTrust/
+
 ├── .github/workflows/
-│   └── ci.yml                 # GitHub Actions CI workflow
+
+│   └── ci.yml                 # GitHub Actions CI workflow
+
 ├── dags/
-│   └── datatrust_pipeline.py  # Airflow DAG definition and stage callables
+
+│   └── datatrust_pipeline.py  # Airflow DAG definition and stage callables
+
 ├── dashboard/
-│   └── app.py                 # Streamlit observability dashboard
+
+│   └── app.py                 # Streamlit observability dashboard
+
 ├── data/
-│   ├── raw/                   # Immutable raw dataset (online_retail.csv)
-│   └── processed/             # Cleaned Parquet exports (when needed)
+
+│   ├── raw/                   # Immutable raw dataset (online_retail.csv)
+
+│   └── processed/             # Cleaned Parquet exports (when needed)
+
 ├── src/
-│   ├── config.py              # Centralized environment & settings configuration
-│   ├── logger.py              # Structured application logger
-│   ├── ingestion/
-│   │   └── loader.py          # Pure CSV / Excel ingestion loader
-│   ├── profiling/
-│   │   └── profiler.py        # Dataset statistical profiler
-│   ├── contracts/
-│   │   ├── models.py          # Typed model of a versioned data contract
-│   │   └── loader.py          # Contract loading and version resolution
-│   ├── quality/
-│   │   ├── base.py            # Quality check base classes and result dataclasses
-│   │   ├── schema.py          # Schema contract validation
-│   │   ├── completeness.py    # Missing value and null ratio rules
-│   │   ├── validity.py        # Domain rules, range checks, cancellation checks
-│   │   ├── uniqueness.py      # Duplicate record detection
-│   │   └── engine.py          # Validation engine orchestrator
-│   ├── scoring/
-│   │   └── scorer.py          # Health Score calculation engine (0–100)
-│   ├── database/
-│   │   ├── connection.py      # Database engine & session factory
-│   │   ├── models.py          # SQLAlchemy ORM models (DeclarativeBase)
-│   │   └── repository.py      # QualityRepository CRUD & querying abstraction
-│   ├── etl/
-│   │   ├── extractor.py       # Source CSV extraction
-│   │   ├── transformer.py     # Lossless feature normalization and typing
-│   │   ├── loader.py          # Chunked batch loader into MySQL
-│   │   └── pipeline.py        # Composable ETL runner
-│   └── anomaly/
-│       ├── detector.py        # Rolling Z-score anomaly detector
-│       └── rules.py           # Severity classification & domain rules
+
+│   ├── config.py              # Centralized environment & settings configuration
+
+│   ├── logger.py              # Structured application logger
+
+│   ├── ingestion/
+
+│   │   └── loader.py          # Pure CSV / Excel ingestion loader
+
+│   ├── profiling/
+
+│   │   └── profiler.py        # Dataset statistical profiler
+
+│   ├── contracts/
+
+│   │   ├── models.py          # Typed model of a versioned data contract
+
+│   │   └── loader.py          # Contract loading and version resolution
+
+│   ├── quality/
+
+│   │   ├── base.py            # Quality check base classes and result dataclasses
+
+│   │   ├── schema.py          # Schema contract validation
+
+│   │   ├── completeness.py    # Missing value and null ratio rules
+
+│   │   ├── validity.py        # Domain rules, range checks, cancellation checks
+
+│   │   ├── uniqueness.py      # Duplicate record detection
+
+│   │   └── engine.py          # Validation engine orchestrator
+
+│   ├── scoring/
+
+│   │   └── scorer.py          # Health Score calculation engine (0–100)
+
+│   ├── database/
+
+│   │   ├── connection.py      # Database engine & session factory
+
+│   │   ├── models.py          # SQLAlchemy ORM models (DeclarativeBase)
+
+│   │   └── repository.py      # QualityRepository CRUD & querying abstraction
+
+│   ├── etl/
+
+│   │   ├── extractor.py       # Source CSV extraction
+
+│   │   ├── transformer.py     # Lossless feature normalization and typing
+
+│   │   ├── loader.py          # Chunked batch loader into MySQL
+
+│   │   └── pipeline.py        # Composable ETL runner
+
+│   └── anomaly/
+
+│       ├── detector.py        # Rolling Z-score anomaly detector
+
+│       └── rules.py           # Severity classification & domain rules
+
 ├── tests/
-│   └── unit/
-│       ├── test_profiler.py
-│       ├── test_quality.py
-│       ├── test_scorer.py
-│       ├── test_database.py
-│       ├── test_etl.py
-│       ├── test_anomaly.py
-│       ├── test_orchestration.py
-│       └── test_api.py
+
+│   └── unit/
+
+│       ├── test_profiler.py
+
+│       ├── test_quality.py
+
+│       ├── test_scorer.py
+
+│       ├── test_database.py
+
+│       ├── test_etl.py
+
+│       ├── test_anomaly.py
+
+│       ├── test_orchestration.py
+
+│       └── test_api.py
+
 ├── scripts/
-│   ├── init_db.py             # Create tables only (idempotent, loads no data)
-│   └── smoke_test_api.py      # HTTP smoke test against a running API
-├── reports/                   # Generated JSON validation and profile reports
-├── logs/                      # Application execution logs
-├── run_profiler.py            # CLI: Run dataset profiler
-├── run_quality.py             # CLI: Run data quality checks
-├── run_scoring.py             # CLI: Run health scoring calculation
-├── run_database.py            # CLI: Run historical persistence check
-├── run_etl.py                 # CLI: Run complete 541k-row ETL pipeline
-├── run_anomaly.py             # CLI: Run time-series anomaly detection
-├── Dockerfile                 # One image for API, dashboard and db-init
-├── docker-compose.yml         # Local stack: MySQL + FastAPI + Streamlit
-├── .dockerignore              # Keeps secrets and datasets out of the image
-├── requirements.txt           # Project dependencies
-├── setup.cfg                  # Pytest & Flake8 configuration
-├── .env.example               # Environment variables template
-├── .gitattributes             # Line-ending normalisation
-└── .gitignore                 # Git ignore configuration
+
+│   ├── init_db.py             # Create tables only (idempotent, loads no data)
+
+│   └── smoke_test_api.py      # HTTP smoke test against a running API
+
+├── reports/                   # Generated JSON validation and profile reports
+
+├── logs/                      # Application execution logs
+
+├── run_profiler.py            # CLI: Run dataset profiler
+
+├── run_quality.py             # CLI: Run data quality checks
+
+├── run_scoring.py             # CLI: Run health scoring calculation
+
+├── run_database.py            # CLI: Run historical persistence check
+
+├── run_etl.py                 # CLI: Run complete 541k-row ETL pipeline
+
+├── run_anomaly.py             # CLI: Run time-series anomaly detection
+
+├── Dockerfile                 # One image for API, dashboard and db-init
+
+├── docker-compose.yml         # Local stack: MySQL + FastAPI + Streamlit
+
+├── .dockerignore              # Keeps secrets and datasets out of the image
+
+├── requirements.txt           # Project dependencies
+
+├── setup.cfg                  # Pytest & Flake8 configuration
+
+├── .env.example               # Environment variables template
+
+├── .gitattributes             # Line-ending normalisation
+
+└── .gitignore                 # Git ignore configuration
+
 ```
 
 ---
@@ -144,40 +261,63 @@ DataTrust/
 ## Setup & Quickstart
 
 ### 1. Prerequisites
+
 - Python 3.13 (or 3.11+)
+
 - MySQL Server (running locally or in container on port 3306)
+
 - Git
 
 ### 2. Virtual Environment Setup
+
 ```bash
+
 # Create and activate virtual environment
+
 python -m venv .venv
 
 # Windows PowerShell:
+
 .venv\Scripts\Activate.ps1
 
 # Linux / macOS:
+
 source .venv/bin/activate
 
 # Install dependencies
+
 pip install -r requirements.txt
+
 ```
 
 ### 3. Configure Environment Variables
+
 Copy `.env.example` to `.env` and configure your MySQL credentials:
+
 ```bash
+
 cp .env.example .env
+
 ```
+
 Inside `.env`:
+
 ```ini
+
 DATABASE_URL=mysql+mysqlconnector://root:your_password@localhost:3306/datatrust
+
 APP_ENV=development
+
 LOG_LEVEL=INFO
+
 ```
 
 Make sure the `datatrust` database exists in MySQL:
+
 ```sql
+
 CREATE DATABASE IF NOT EXISTS datatrust;
+
 ```
 
 ---
@@ -185,71 +325,113 @@ CREATE DATABASE IF NOT EXISTS datatrust;
 ## Data Contract
 
 The expected schema is declared in a versioned contract under
+
 `config/contracts/<name>/v<major>.<minor>.<patch>.json`. The contract states the
+
 *expectation*; the quality engine's existing checks remain the validators.
 
 Source column names are canonical, and each column carries the `stored_name` it
+
 takes in the `retail_transactions` table, so both representations are derived
+
 from one document and cannot drift apart. Set `CONTRACT_VERSION` to pin a
+
 version (default `latest`); older versions are never overwritten, so historical
+
 runs stay interpretable.
 
 Contract release 1.0.0 enforces the `columns` and `dtypes` sections, listed in
+
 its `enforced_sections` field. Nullability and constraints are declared but not
+
 yet enforced — completeness and validity keep their own rules for now.
 
 ## Incremental ETL and Idempotency
 
 By default the pipeline replaces the whole `retail_transactions` snapshot on
+
 every run. That is simple and correct, but it rewrites 541,909 rows to pick up a
+
 handful of new ones, and the cost grows with the dataset rather than with the
+
 change. Incremental mode loads only what is actually new:
 
 ```bash
+
 python run_etl.py --incremental
+
 ```
 
 **The watermark.** After a successful load the pipeline records the highest
+
 source `invoice_date` it has proven loaded, in the `etl_watermarks` table. That
+
 checkpoint is durable state, read at the start of the next run to decide where
+
 to resume. With no checkpoint and an empty table the run performs a full load;
+
 with no checkpoint but a populated table it resumes from the newest stored row,
+
 so enabling the feature on an existing warehouse does not reload it.
 
 **Why a watermark alone is not enough.** `invoice_date` is far from unique — the
+
 source holds roughly 23,000 distinct timestamps across 541,909 rows, up to 1,114
+
 rows share a single timestamp, and 15 sit on the newest one. Comparing with `>`
+
 would silently drop every row on the boundary; comparing with `>=` would reload
+
 them on every run. So the watermark is only a coarse filter, deliberately
+
 inclusive, and the boundary is settled exactly by reconciliation.
 
 **Idempotency by reconciliation.** Candidate rows are matched against the rows
+
 already stored in the same window using a fingerprint of the eight source
+
 fields: `InvoiceNo`, `StockCode`, `Description`, `Quantity`, `InvoiceDate`,
+
 `UnitPrice`, `CustomerID`, `Country`. Matching counts *occurrences* rather than
+
 values, so re-running the same batch loads nothing while genuinely new rows
+
 still load.
 
 **Source duplicates are preserved.** The dataset legitimately contains 5,268
+
 exact duplicate rows and DataTrust reports them as a quality finding, so they
+
 must survive the load. Because reconciliation is a multiset difference, three
+
 identical source rows against two stored ones load exactly one more — never zero
+
 (losing a real row) and never three (duplicating on rerun). No uniqueness
+
 constraint is added to the table, and the duplicate-detection check is unchanged.
 
 **Failures never advance the checkpoint.** The watermark is written only after
+
 the load has been committed. If any stage fails, the run is recorded FAILED and
+
 the checkpoint keeps its previous value, so the next attempt reprocesses exactly
+
 the batch that failed. Retrying is therefore always safe.
 
 **Late-arriving records.** A watermark cannot see a row stamped earlier than the
+
 last load. `--lookback-days N` widens the window to re-examine recent history;
+
 because reconciliation removes anything already stored, a lookback can only find
+
 missed rows, never duplicate loaded ones.
 
 **Airflow.** Orchestration is unchanged: the DAG still delegates to
+
 `run_etl_pipeline` in `src/etl/pipeline.py`, so incremental behaviour, the run
+
 lifecycle and retry semantics are identical whether the pipeline is triggered by
+
 Airflow or run standalone.
 
 ## Running the Pipeline
@@ -257,54 +439,111 @@ Airflow or run standalone.
 You can run individual pipeline stages via CLI runners:
 
 ### 1. Dataset Profiling
+
 ```bash
+
 python run_profiler.py
+
 ```
+
 *Profiles 541,909 rows, generating summary stats, missing rates, and duplicate counts into `reports/phase1_profile.json`.*
 
 ### 2. Data Quality Validation
+
 ```bash
+
 python run_quality.py
+
 ```
-*Executes 16 quality checks across schema, completeness, validity, and uniqueness, saving results to `reports/quality_<timestamp>.json`.*
+
+*Executes the data quality checks across schema, completeness, validity, and uniqueness, saving results to `reports/quality_<timestamp>.json`.*
 
 ### 3. Data Health Scoring
+
 ```bash
+
 python run_scoring.py
+
 ```
+
 *Computes the weighted 0–100 Data Health Score and assigns a status tier (`EXCELLENT`, `GOOD`, `POOR`, `CRITICAL`).*
 
 ### 4. Database Persistence
+
 ```bash
+
 python run_database.py
+
 ```
+
 *Runs quality checks, computes health scores, and persists run metadata to MySQL tables.*
 
 ### 5. Full ETL Pipeline (541k Rows)
+
 ```bash
+
 python run_etl.py
+
 ```
+
 *Extracts raw data, applies lossless transformations (`is_cancellation`, `revenue`, ISO timestamps), and batch-loads 541,909 records into MySQL.*
 
 ### 6. Time-Series Anomaly Detection
+
 ```bash
+
 python run_anomaly.py
+
 ```
+
 *Analyzes monthly trends in revenue, volume, and cancellation rates, detecting and persisting anomalies to MySQL.*
 
 ---
 
-## Observability Dashboard
+## FastAPI
+
+DataTrust exposes the pipeline's persisted observability results through a FastAPI service.
+
+Available Endpoints
+
+GET /health — service and database health
+
+GET /api/v1/summary — latest operational summary
+
+GET /api/v1/health-score — latest 0–100 health score and category scores
+
+GET /api/v1/pipeline-runs — paginated pipeline run history
+
+GET /api/v1/quality-results/{run_id} — quality results for a pipeline run
+
+GET /api/v1/anomalies — persisted anomaly results
+
+GET /docs — interactive Swagger UI
+
+Production Swagger UI: https://datatrust-production-1ef7.up.railway.app/docs
+
+The API separates pipeline status from data health status, returns real pagination totals, uses dependency-injected database sessions, logs HTTP requests, and exposes database failures through controlled HTTP 503 responses instead of leaking SQLAlchemy internals.
+
+Observability Dashboard
 
 Launch the interactive Streamlit dashboard:
+
 ```bash
+
 streamlit run dashboard/app.py
+
 ```
+
 Navigate to `http://localhost:8501` to view:
+
 - **System Overview**: Overall health gauges, latest pipeline metrics, and quality distribution.
+
 - **Data Quality Explorer**: Breakdown of pass/warning/failure checks and affected row counts.
+
 - **Retail Analytics**: Transaction snapshots, top products, and geographical distribution.
+
 - **Pipeline History**: Historical trend charts of data health scores over time.
+
 - **Anomaly Detection Radar**: KPI cards, deviation bar charts, and detailed anomaly history.
 
 ---
@@ -312,9 +551,13 @@ Navigate to `http://localhost:8501` to view:
 ## Airflow Orchestration
 
 The pipeline DAG is defined in [`dags/datatrust_pipeline.py`](file:///C:/Users/madhan/OneDrive/Desktop/DataTrust/dags/datatrust_pipeline.py) with 4 sequential tasks:
+
 ```
+
 [extract_transform_load] ──▶ [quality_validation] ──▶ [health_scoring_and_persistence] ──▶ [anomaly_detection]
+
 ```
+
 All tasks use modular callables referencing core `src/` modules, allowing direct execution and testing even outside of an Airflow cluster.
 
 ---
@@ -322,188 +565,299 @@ All tasks use modular callables referencing core `src/` modules, allowing direct
 ## Running with Docker
 
 The Compose stack runs the three services the application needs: **MySQL**,
+
 the **FastAPI** service and the **Streamlit** dashboard. Airflow is not part of
+
 it — orchestration stays local for this project, so the stack contains no
+
 scheduler, webserver or Airflow metadata database.
 
 ### Prerequisites
+
 - **Docker Desktop** (or Docker Engine) with the `docker compose` CLI
+
 - The repository checked out locally — everything else lives in the image
+
 - **No local Python virtual environment is required to run the stack.** The
-  containers install from `requirements.txt` themselves. The venv is only for
-  running the test suite and the CLI runners outside Docker.
+
+  containers install from `requirements.txt` themselves. The venv is only for
+
+  running the test suite and the CLI runners outside Docker.
 
 ### Environment setup
+
 Copy the template and fill in your own values:
 
 ```bash
-cp .env.example .env          # PowerShell: copy .env.example .env
+
+cp .env.example .env          # PowerShell: copy .env.example .env
+
 ```
 
 | Variable | Required | Purpose |
+
 |---|---|---|
+
 | `MYSQL_ROOT_PASSWORD` | yes | Root password for the MySQL container |
+
 | `MYSQL_USER` | yes | Application account the API and dashboard connect as |
+
 | `MYSQL_PASSWORD` | yes | Password for that account |
+
 | `MYSQL_DATABASE` | no | Schema name; defaults to `datatrust` |
+
 | `MYSQL_HOST_PORT` | no | Host port for MySQL; defaults to `3307` |
 
 Compose fails with a clear error if any of the three required values is missing,
+
 rather than falling back to a default password. `.env` is gitignored and is
+
 never copied into the image.
 
 ### Start the stack
+
 ```bash
-docker compose config     # validate the compose file and .env before building
+
+docker compose config     # validate the compose file and .env before building
+
 docker compose build
+
 docker compose up -d
+
 docker compose ps
+
 ```
 
 | Service | Role | Address |
+
 |---|---|---|
+
 | `mysql` | MySQL 8.0; data in the named volume `datatrust_mysql_data` | `localhost:3307` (3306 stays free for a local MySQL) |
+
 | `db-init` | One-shot: creates tables, then exits. Loads no data. | — |
+
 | `api` | FastAPI served by Uvicorn; `/health` reports database connectivity | http://localhost:8000 · docs at http://localhost:8000/docs |
+
 | `dashboard` | Streamlit; reads MySQL directly for heavy retail queries | http://localhost:8501 |
 
 ### What happens on first start
+
 1. `mysql` starts and creates the database named by `MYSQL_DATABASE`.
+
 2. `db-init` runs `scripts/init_db.py` once, creates any missing tables from
-   `src/database/models.py`, and exits. **It loads no data.**
+
+   `src/database/models.py`, and exits. **It loads no data.**
+
 3. `api` waits for the healthcheck and for `db-init` to finish, then serves.
+
 4. `dashboard` starts once MySQL is healthy.
 
 The retail dataset is never imported automatically — restarting the stack
+
 cannot re-load 541,909 rows. Loading data is one explicit command:
 
 ```bash
+
 docker compose run --rm api python run_etl.py
+
 ```
 
 `data/`, `reports/` and `logs/` are bind-mounted from the host, so the ETL
+
 reads the CSV you already have and writes reports back where you can see them.
 
 ### Configuration
+
 Containers do not use the `DATABASE_URL` from your `.env`; that value points at
+
 `localhost`, which inside a container means the container itself. Compose builds
+
 a container-specific URL from the MySQL variables instead:
 
 ```
+
 mysql+mysqlconnector://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+
 ```
 
 The hostname `mysql` is the Compose service name. No credentials appear in any
+
 source file or in the image.
 
 ### Checking status and logs
+
 `docker compose ps` shows each service's state and health. `mysql`, `api` and
+
 `dashboard` carry healthchecks, so a healthy stack reads `running (healthy)`;
+
 `db-init` is expected to show `exited (0)` once it has created the tables.
 
 ```bash
+
 docker compose ps
+
 docker compose logs --tail=100 mysql
+
 docker compose logs --tail=100 api
+
 docker compose logs --tail=100 dashboard
-docker compose logs -f api          # follow one service
+
+docker compose logs -f api          # follow one service
+
 ```
 
 If `api` is unhealthy, its log usually points at MySQL — check `mysql` first.
 
 ### Data persistence
+
 MySQL data lives in the named volume `datatrust_mysql_data`:
 
 ```bash
-docker compose down     # containers removed, data kept
-docker compose up -d    # same data comes back
-docker compose down -v  # DESTROYS the volume and all data
+
+docker compose down     # containers removed, data kept
+
+docker compose up -d    # same data comes back
+
+docker compose down -v  # DESTROYS the volume and all data
+
 ```
 
 ### Rebuilding after a change
+
 ```bash
+
 docker compose build
+
 docker compose up -d
+
 ```
 
 Use `docker compose build --no-cache api` if a dependency change is not picked
+
 up, and `docker compose restart api` for a code-only change.
 
 ### Verifying a running stack
+
 ```bash
+
 python scripts/smoke_test_api.py --base-url http://127.0.0.1:8000
+
 ```
 
 The smoke test checks status codes, response shape, pagination, 404/422
+
 handling and that error responses expose no database internals. Before the ETL
+
 has been run, `/api/v1/health-score` correctly answers 404 — that is the
+
 expected empty-data response, not a failure.
 
 ---
 
 ## Cloud Deployment (Railway)
 
-> Deployment readiness only — the project is **not yet deployed**. This section
-> records the intended topology and the settings the code expects.
+DataTrust is deployed on Railway with a managed MySQL database, a public FastAPI service, and a public Streamlit dashboard.
 
-The same image serves every application role, so one repository builds all
-services. The intended topology is four services:
+Production Services
 
-| Service | Role | Public | Start command |
-|---|---|---|---|
-| MySQL | Managed database plugin | No — private network | — |
-| `api` | FastAPI | Yes | `python run_api.py` |
-| `dashboard` | Streamlit | Yes | see below |
-| `db-init` | One-off schema creation | No | `python scripts/init_db.py` |
+Service
 
-Dashboard start command:
+Role
 
-```bash
-streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true
-```
+Public
 
-**Ports.** Railway assigns a port at runtime and routes to it. `run_api.py`
-reads `PORT` (falling back to 8000), and the Dockerfile's default command uses
-it rather than a hardcoded `uvicorn --port 8000`. Streamlit takes the same value
-through `--server.port=$PORT`.
+MySQL
 
-**Database URL.** Set `DATABASE_URL` to the managed instance using its private
-host. A provider's bare `mysql://` string is accepted and normalised to the
-`mysql+mysqlconnector://` driver this project pins, so the value can be pasted
-across unchanged.
+Managed persistent database
 
-**Schema.** No migration is required for a fresh database: `create_all()`
-creates all five tables, including `etl_watermarks`, with their current
-definitions. `scripts/init_db.py` is idempotent and loads no data.
+No — private network
 
-**Environment.** Set `APP_ENV=production` so Uvicorn's autoreloader stays off,
-and name the dashboard origin in `CORS_ALLOW_ORIGINS` once its domain exists.
-Pin `CONTRACT_VERSION` so a new contract file cannot silently change how a
-deployed pipeline scores. See `.env.example` for the full list.
+DataTrust API
 
-**Data.** The 45 MB source CSV is excluded from both Git and the image, so a
-freshly deployed stack starts with an empty database — the dashboard reports
-this rather than failing. Loading the initial dataset is a separate one-off
-task, and is safe to retry because `run_etl.py --incremental` is idempotent.
+FastAPI + Uvicorn
 
-Airflow is not deployed; it remains a local development orchestrator, and its
-callables stay importable and tested.
+Yes
 
----
+DataTrust Dashboard
 
-## Testing & Quality Assurance
+Streamlit + Plotly
+
+Yes
+
+db-init
+
+One-off idempotent schema initialization
+
+No
+
+Live Production Links
+
+Dashboard: https://datatrust.up.railway.app
+
+API Swagger UI: https://datatrust-production-1ef7.up.railway.app/docs
+
+The production API exposes health, summary, pipeline-run, quality-result, and anomaly endpoints. Swagger UI is available at /docs for interactive API exploration.
+
+Production Deployment Notes
+
+The same Docker image supports the API, dashboard, and database initialization roles. Railway injects the runtime PORT, and run_api.py reads it for Uvicorn.
+
+The Streamlit service uses the Railway-compatible shell start command:
+
+/bin/sh -c 'exec streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port "$PORT" --server.headless=true'
+
+DATABASE_URL is configured from Railway's private MySQL service reference. The application normalizes a provider mysql:// URL to the pinned mysql+mysqlconnector:// driver.
+
+The production database is initialized with scripts/init_db.py, which creates the current schema without loading source data. The 541,909-row Online Retail dataset was then loaded as an explicit one-time ETL operation.
+
+Airflow is intentionally kept as a local/development orchestrator rather than deployed as a separate cloud service. The DAG delegates to the same reusable ETL and pipeline lifecycle code used by the standalone runners.
+
+Production Validation
+
+The deployed system was validated end-to-end:
+
+Pipeline status: SUCCESS
+
+Rows processed: 541,909
+
+Data Health Score: 72.33 / 100 — Poor
+
+Quality results: 18 checks; 12 passed, 3 warnings, 1 failed
+
+Persisted anomalies: 2
+
+Anomalies detected: November 2011 revenue +94.95% (Warning) and transaction volume +103.22% (Critical)
+
+API status: OPERATIONAL
+
+Dashboard: Live against the Railway MySQL database
+
+The deployed dashboard and API read persisted production results rather than static sample values.
+
+Testing & Quality Assurance
 
 Run the complete test suite with Pytest:
+
 ```bash
+
 pytest -v
+
 ```
-All 64 unit tests use in-memory SQLite fixtures with zero external database requirements:
+
+The current suite contains 225 collected tests; 224 passed and 1 was skipped. Tests use in-memory SQLite fixtures for database-isolated coverage with zero external database requirements:
+
 - `test_profiler.py` — Profiling stats and null calculation
+
 - `test_quality.py` — Schema, completeness, validity, uniqueness rules
+
 - `test_scorer.py` — Scoring formulas, weights, and tier classification
+
 - `test_database.py` — SQLAlchemy ORM models, relations, and repository queries
+
 - `test_etl.py` — Extractor, Transformer, Batch Loader, and Error handling
+
 - `test_anomaly.py` — Statistical anomaly detection, baseline history, and business rules
+
 - `test_orchestration.py` — Airflow DAG task callables, sequential execution, and failure bubbling
 
 ---
@@ -511,7 +865,25 @@ All 64 unit tests use in-memory SQLite fixtures with zero external database requ
 ## Continuous Integration (GitHub Actions)
 
 Every pull request and push to `main` triggers `.github/workflows/ci.yml`:
+
 1. Sets up Python 3.13 environment
+
 2. Installs pinned dependencies from `requirements.txt`
+
 3. Sets in-memory test database environment (`sqlite+pysqlite:///:memory:`)
+
 4. Runs full test suite (`pytest -v`)
+
+Current Validation Snapshot
+
+Pytest: 224 passed, 1 skipped (225 collected)
+
+Flake8: clean
+
+pip check: clean
+
+GitHub Actions CI: passing
+
+Railway API: healthy and operational
+
+Railway Dashboard: live and verified
